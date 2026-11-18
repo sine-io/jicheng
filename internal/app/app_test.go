@@ -235,12 +235,74 @@ func TestMapSelectionAndSSRRefreshIsolation(t *testing.T) {
 	_, _, _, b := newTestApp(t)
 	b.post("start-pick", url.Values{"quick": {"true"}})
 	b.post("pick", url.Values{"point": {"117.2,39.1"}})
+	if b.state()["origin"] != nil || b.state()["preview"] == nil {
+		t.Fatal("map selection should preview without creating a location")
+	}
+	b.post("assign-place", url.Values{"kind": {"origin"}})
 	if b.state()["origin"] == nil {
-		t.Fatal("map pick did not create an origin")
+		t.Fatal("confirmed map selection did not create an origin")
 	}
 	previous := b.workspace
 	b.refresh()
 	if b.workspace == previous || b.state()["origin"] != nil {
 		t.Fatal("page refresh should start a separate workspace")
+	}
+}
+
+func TestUnifiedSearchAndMultipleOriginAssignment(t *testing.T) {
+	_, f, _, b := newTestApp(t)
+	status, body := b.post("submit", url.Values{"query": {"天津站"}})
+	if status != 200 || !strings.Contains(body, "地点搜索结果") {
+		t.Fatal("missing search results")
+	}
+	b.post("inspect-place", url.Values{"choice": {"0"}})
+	state := b.state()
+	if state["origin"] != nil || state["preview"] == nil || len(state["destinations"].([]any)) != 0 {
+		t.Fatal("inspection mutated the saved places")
+	}
+	b.post("assign-place", url.Values{"kind": {"destination"}})
+	if b.state()["origin"] != nil || len(b.state()["destinations"].([]any)) != 1 {
+		t.Fatal("must support a destination before any origin")
+	}
+	b.post("inspect-point", url.Values{"point": {"117.15,39.15"}})
+	b.post("assign-place", url.Values{"kind": {"origin"}})
+	first := b.state()["origin"].(map[string]any)["id"].(string)
+	b.post("inspect-point", url.Values{"point": {"117.25,39.25"}})
+	b.post("assign-place", url.Values{"kind": {"origin"}})
+	state = b.state()
+	if len(state["origins"].([]any)) != 2 || state["origin"].(map[string]any)["id"] == first {
+		t.Fatal("adding another origin replaced the first")
+	}
+	b.post("inspect-point", url.Values{"point": {"117.35,39.35"}})
+	b.post("assign-place", url.Values{"kind": {"destination"}})
+	b.post("activate-origin", url.Values{"id": {first}})
+	state = b.state()
+	if state["origin"].(map[string]any)["id"] != first || len(state["destinations"].([]any)) != 2 {
+		t.Fatal("switching origins must preserve the shared destinations")
+	}
+	b.post("query", nil)
+	f.mu.Lock()
+	calls := f.calls
+	f.mu.Unlock()
+	if calls != 10 {
+		t.Fatalf("expected two destinations with five modes, got %d calls", calls)
+	}
+	b.post("submit", url.Values{"query": {"地图选择地点"}})
+	f.mu.Lock()
+	after := f.calls
+	f.mu.Unlock()
+	if after != calls || b.state()["origin"].(map[string]any)["id"] != first {
+		t.Fatal("search must not query routes or replace an origin")
+	}
+	b.post("inspect-point", url.Values{"point": {"117.25,39.25"}})
+	b.post("assign-place", url.Values{"kind": {"origin"}})
+	if len(b.state()["origins"].([]any)) != 2 {
+		t.Fatal("duplicate origin was appended")
+	}
+	b.post("inspect-point", url.Values{"point": {"117.45,39.45"}})
+	b.post("clear-search", nil)
+	b.post("assign-place", url.Values{"kind": {"destination"}})
+	if len(b.state()["destinations"].([]any)) != 2 {
+		t.Fatal("dismissed preview was saved")
 	}
 }

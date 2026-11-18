@@ -33,8 +33,8 @@ func (a *App) action(c *gin.Context) {
 		a.search(c, w, action == "search-editor")
 		return
 	}
-	if action == "pick" {
-		a.pick(c, w)
+	if action == "pick" || action == "inspect-point" {
+		a.pick(c, w, action == "inspect-point")
 		return
 	}
 	targets := allTargets
@@ -94,8 +94,7 @@ func (a *App) action(c *gin.Context) {
 	case "activate-origin":
 		if _, index := placeByID(w.view.Origins, c.PostForm("id")); index >= 0 {
 			w.view.ActiveID = c.PostForm("id")
-			w.view.Query = w.view.Active().Name
-			w.view.SearchOpen = false
+			clearSearch(w)
 			w.view.Picking = false
 			invalidate(w)
 		}
@@ -116,10 +115,9 @@ func (a *App) action(c *gin.Context) {
 			*places = append((*places)[:index], (*places)[index+1:]...)
 			if kind == "origin" && w.view.ActiveID == p.ID {
 				w.view.ActiveID = ""
-				w.view.Query = ""
+				clearSearch(w)
 				if len(w.view.Origins) > 0 {
 					w.view.ActiveID = w.view.Origins[0].ID
-					w.view.Query = w.view.Origins[0].Name
 				}
 			}
 			invalidate(w)
@@ -141,22 +139,66 @@ func (a *App) action(c *gin.Context) {
 			(*places)[index] = r.Place
 			if r.Kind == "origin" {
 				w.view.ActiveID = r.Place.ID
-				w.view.Query = r.Place.Name
 			}
 			w.undo = nil
 			invalidate(w)
 			w.view.Toast = "已撤销删除"
 		}
-	case "select-origin":
+	case "inspect-place":
 		index, err := strconv.Atoi(c.PostForm("choice"))
 		if err == nil && index >= 0 && index < len(w.view.Search) {
-			p := w.view.Search[index]
-			savePlace(w, "origin", w.view.ActiveID, p.Name, p)
+			selected := w.view.Search[index]
+			w.view.Preview = &selected
 			w.view.SearchOpen = false
+			w.view.Picking = false
+			w.searchSeq++
 		}
-	case "close-search":
-		w.view.SearchOpen = false
+		targets = []string{"search", "picker-banner", "notice"}
+	case "assign-place":
+		kind := c.PostForm("kind")
+		if !validKind(kind) {
+			w.mu.Unlock()
+			c.AbortWithStatus(400)
+			return
+		}
+		if w.view.Preview != nil {
+			selected := *w.view.Preview
+			places := w.view.Origins
+			label := "起点"
+			if kind == "destination" {
+				places = w.view.Destinations
+				label = "终点"
+			}
+			duplicate := false
+			for _, p := range places {
+				if p.Point == selected.Point {
+					duplicate = true
+					if kind == "origin" && w.view.ActiveID != p.ID {
+						w.view.ActiveID = p.ID
+						invalidate(w)
+					}
+					break
+				}
+			}
+			if duplicate {
+				w.view.Toast = "这个地点已在" + label + "列表中"
+			} else {
+				savePlace(w, kind, "", selected.Name, selected)
+				w.view.Toast = "已添加" + label + "：" + selected.Name
+			}
+			clearSearch(w)
+		}
+	case "close-search", "clear-search":
+		clearSearch(w)
+		w.view.Picking = false
+		targets = []string{"search", "picker-banner", "notice"}
+	case "back-search":
+		w.view.Preview = nil
+		w.view.SearchOpen = true
 		targets = []string{"search"}
+	case "refresh-routes":
+		invalidate(w)
+		targets = []string{"results", "route-options", "notice"}
 	case "policy":
 		value, err := strconv.Atoi(c.PostForm("policy"))
 		valid := false
@@ -200,13 +242,15 @@ func (a *App) action(c *gin.Context) {
 		targets = []string{"results", "route-options"}
 	case "close-options":
 		w.view.PanelID = ""
+		w.view.FocusID = ""
 		targets = []string{"route-options"}
 	case "start-pick":
 		w.view.Picking = true
-		w.view.PickKind = "origin"
+		w.view.PickKind = ""
 		w.view.PickQuick = c.PostForm("quick") == "true"
 		if w.view.PickQuick {
 			w.view.Editor = nil
+			clearSearch(w)
 		} else if w.view.Editor != nil {
 			w.view.Editor.Name = formValue(c, "name", 32)
 			w.view.PickKind = w.view.Editor.Kind
@@ -250,7 +294,6 @@ func savePlace(w *workspace, kind, id, name string, selected maps.Place) {
 	}
 	if kind == "origin" {
 		w.view.ActiveID = p.ID
-		w.view.Query = p.Name
 	}
 	invalidate(w)
 }
@@ -268,13 +311,10 @@ func (a *App) search(c *gin.Context, w *workspace, editor bool) {
 		w.view.Editor.Query = query
 	} else {
 		w.view.Query = query
-		if active := w.view.Active(); active != nil && (query == active.Name || query == "") {
-			invalidate(w)
-			w.mu.Unlock()
-			a.update(c, w, allTargets...)
-			return
-		}
+		w.view.Preview = nil
 		w.view.SearchOpen = true
+		w.view.SearchError = ""
+		w.view.Picking = false
 	}
 	w.searchSeq++
 	seq := w.searchSeq
@@ -283,7 +323,11 @@ func (a *App) search(c *gin.Context, w *workspace, editor bool) {
 		city = active.City
 	}
 	w.mu.Unlock()
-	choices, err := a.provider.Search(c.Request.Context(), query, city)
+	var choices []maps.Place
+	var err error
+	if query != "" {
+		choices, err = a.provider.Search(c.Request.Context(), query, city)
+	}
 	if c.Request.Context().Err() != nil {
 		c.Status(204)
 		return
@@ -307,17 +351,17 @@ func (a *App) search(c *gin.Context, w *workspace, editor bool) {
 		w.view.Search = choices
 		w.view.Toast = ""
 		if err != nil {
-			w.view.Toast = err.Error()
+			w.view.SearchError = err.Error()
 		}
 	}
 	w.mu.Unlock()
 	if editor {
 		a.update(c, w, "modal", "notice")
 	} else {
-		a.update(c, w, "search", "notice")
+		a.update(c, w, "search", "picker-banner", "notice")
 	}
 }
-func (a *App) pick(c *gin.Context, w *workspace) {
+func (a *App) pick(c *gin.Context, w *workspace, inspect bool) {
 	point, err := maps.ParsePoint(c.PostForm("point"))
 	if err != nil {
 		w.mu.Lock()
@@ -327,13 +371,15 @@ func (a *App) pick(c *gin.Context, w *workspace) {
 		return
 	}
 	w.mu.Lock()
-	if !w.view.Picking {
+	if !inspect && !w.view.Picking {
 		w.mu.Unlock()
 		c.Status(204)
 		return
 	}
+	w.searchSeq++
+	seq := w.searchSeq
 	revision := w.revision
-	quick := w.view.PickQuick
+	quick := inspect || w.view.PickQuick
 	editor := w.view.Editor
 	w.mu.Unlock()
 	selected, err := a.provider.Reverse(c.Request.Context(), point)
@@ -342,7 +388,7 @@ func (a *App) pick(c *gin.Context, w *workspace) {
 		return
 	}
 	w.mu.Lock()
-	if !w.view.Picking || w.revision != revision || w.view.Editor != editor {
+	if (!inspect && !w.view.Picking) || w.searchSeq != seq || w.revision != revision || w.view.Editor != editor {
 		w.mu.Unlock()
 		c.Status(204)
 		return
@@ -352,13 +398,17 @@ func (a *App) pick(c *gin.Context, w *workspace) {
 	} else {
 		w.view.Picking = false
 		if quick {
-			savePlace(w, "origin", w.view.ActiveID, selected.Name, selected)
+			w.view.Preview = &selected
+			w.view.Query = ""
+			w.view.Search = nil
+			w.view.SearchOpen = false
+			w.view.SearchError = ""
 		} else if w.view.Editor != nil {
 			w.view.Editor.Selected = &selected
 		}
 	}
 	w.mu.Unlock()
-	a.update(c, w, allTargets...)
+	a.update(c, w, "search", "modal", "picker-banner", "notice")
 }
 func (a *App) query(c *gin.Context, w *workspace) {
 	w.mu.Lock()
@@ -410,4 +460,13 @@ func (a *App) query(c *gin.Context, w *workspace) {
 	w.cancel = nil
 	w.mu.Unlock()
 	a.update(c, w, "results", "route-options", "notice")
+}
+
+func clearSearch(w *workspace) {
+	w.searchSeq++
+	w.view.Query = ""
+	w.view.Search = nil
+	w.view.SearchOpen = false
+	w.view.SearchError = ""
+	w.view.Preview = nil
 }

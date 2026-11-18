@@ -240,7 +240,7 @@ func (a *App) mapState(c *gin.Context) {
 		destinations = append(destinations, destination{p, ui.Letter(i), v.Cell(p.ID, p.Mode)})
 	}
 	c.Header("Cache-Control", "private, no-store")
-	c.JSON(200, gin.H{"revision": revision, "origin": v.Active(), "destinations": destinations, "focusId": v.FocusID, "picking": v.Picking, "pickKind": v.PickKind, "configured": v.MapConfigured})
+	c.JSON(200, gin.H{"revision": revision, "origin": v.Active(), "origins": v.Origins, "preview": v.Preview, "destinations": destinations, "focusId": v.FocusID, "picking": v.Picking, "pickKind": v.PickKind, "configured": v.MapConfigured})
 }
 
 var servicePath = regexp.MustCompile(`^/(v3|v4|v5)/(place/(text|detail|around)|geocode/(geo|regeo)|direction/(driving|walking|bicycling|riding|transit/integrated))$`)

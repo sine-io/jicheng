@@ -1,9 +1,9 @@
 {
   "name": "jicheng",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "几程 · 多目的地路线查询 — Go + Gin + templ + htmx",
+  "description": "几程 · 多起点多终点地图 — Go + Gin + templ + htmx",
   "scripts": {
     "dev": "./scripts/dev.sh",
     "build": "./scripts/build.sh",

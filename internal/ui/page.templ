@@ -12,11 +12,12 @@ templ Page(v View) {
 	<html lang="zh-CN">
 		<head>
 			<meta charset="utf-8"/>
-			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<title>几程 · 多目的地路线查询</title>
+			<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+			<title>几程 · 多起点多终点地图</title>
 			<meta name="application-name" content="几程"/>
-			<meta name="description" content="几程：切换出发地，比较多个目的地的路线和预计耗时。把远近，换成时间。"/>
-			<link rel="stylesheet" href="/assets/styles.css"/><script src="/assets/htmx.min.js" defer></script>
+			<meta name="description" content="几程：在地图上设置多个起点和终点，切换起点比较路线与耗时。把远近，换成时间。"/>
+			<link rel="stylesheet" href="/assets/styles.css"/>
+			<script src="/assets/htmx.min.js" defer></script>
 			<script src="/assets/app.js" defer></script>
 		</head>
 		<body>
@@ -24,67 +25,78 @@ templ Page(v View) {
 				<form id="workspace-meta" hidden><input type="hidden" name="workspace" value={ v.Workspace }/><input type="hidden" name="csrf" value={ v.CSRF }/></form>
 				<div id="route-sync" hidden></div>
 				<div id="editor-sync" hidden></div>
+				<div id="search-sync" hidden></div>
 				<div id="updates" hidden></div>
+				<section class="map-workspace" aria-label="高德路线地图">
+					<div class="map-canvas" id="route-map" role="application" aria-label="高德地图，点击地点可设为起点或终点"></div>
+					<div id="map-loading" class="map-state-message" role="status">
+						@Icon("SpinnerGap", 28)
+						<span>正在加载地图…</span>
+					</div>
+				</section>
 				<header class="app-header">
 					<div class="brand">
-						@Icon("Path", 46)
-						<h1>几程</h1>
+						@Icon("Path", 32)
+						<div><h1>几程</h1><span>把远近，换成时间</span></div>
 					</div>
-					<p class="brand-subtitle">多目的地路线查询</p>
 					<div class="header-actions">
-						<details class="provider-control">
-							<summary class="provider-trigger">
-								<span>地图服务：</span><strong>高德</strong>@Icon("CaretDown", 16)
-							</summary>
-							<div class="provider-menu">
-								<p class="menu-caption">地图来源</p>
-								<button type="button" disabled>
-									@Icon("MapTrifold", 20)
-									<span><strong>高德</strong><small>真实地图、地点搜索与路线规划</small></span>@Icon("Check", 18)
-								</button><button type="button" disabled><span><strong>百度</strong><small>尚未接入</small></span></button><button type="button" disabled><span><strong>开源方案</strong><small>尚未接入</small></span></button>
-							</div>
-						</details>
-						<button type="button" class="demo-badge live-status" data-open-help>
-							<span class="status-dot" id="map-status-dot"></span><span id="map-status">连接中</span>@Icon("Info", 14)
+						<div class="live-status"><span class="status-dot" id="map-status-dot"></span><strong>高德地图</strong><span id="map-status">连接中</span></div>
+						<button type="button" class="help-button" data-open-help aria-label="使用说明">
+							@Icon("Info", 22)
 						</button>
 					</div>
 				</header>
-				<div id="origins">@Origins(v)</div>
-				<div id="search">@Search(v)</div>
-				<div id="preferences">@Preferences(v)</div>
-				<section class="map-workspace" aria-label="高德路线地图">
-					<div class="map-canvas" id="route-map" role="application" aria-label="高德地图，可拖动或使用缩放按钮"></div>
-					<div id="map-loading" class="map-state-message" role="status">
-						@Icon("SpinnerGap", 28)
-						<span>正在加载高德地图…</span>
-					</div>
-					<div id="picker-banner">@Picker(v)</div>
-					<div class="map-empty-message" id="map-empty">先搜索地点，或在地图上选点</div>
-					<div class="map-controls">
-						<button type="button" class="fit-button" id="map-fit" title="显示全部地点" aria-label="显示全部地点">
-							@Icon("ArrowsOut", 24)
+				<button type="button" class="panel-toggle" id="panel-toggle" aria-controls="route-sidebar" aria-expanded="true" hidden>
+					@Icon("Path", 20)
+					<span>路线与耗时</span><span id="place-count"></span>
+				</button>
+				<aside class="route-sidebar" id="route-sidebar" aria-label="起点终点与路线" hidden>
+					<div class="sidebar-heading">
+						<div><h2>路线与耗时</h2><p>切换起点，比较到各个终点的时间</p></div>
+						<button type="button" class="icon-button" data-collapse-panel aria-label="收起路线面板">
+							@Icon("Minus", 20)
 						</button>
-						<div class="zoom-controls">
-							<button type="button" id="map-zoom-in" aria-label="放大地图">
-								@Icon("Plus", 25)
-							</button>
-							<button type="button" id="map-zoom-out" aria-label="缩小地图">
-								@Icon("Minus", 25)
-							</button>
+					</div>
+					<div id="origins">
+						@Origins(v)
+					</div>
+					<div id="preferences">
+						@Preferences(v)
+					</div>
+					<div class="sidebar-scroll">
+						<div id="route-options">
+							@Options(v)
+						</div>
+						<div id="results" aria-live="polite">
+							@Results(v)
 						</div>
 					</div>
-				</section>
-				<div id="route-options">@Options(v)</div>
-				<div id="results" aria-live="polite">@Results(v)</div>
-				<footer class="app-footer">
-					<span>数据来源：高德地图 · 耗时为查询时的预估</span>
-					<button type="button" data-open-help>
-						@Icon("Info", 15)
-						<span>使用说明</span>
+				</aside>
+				<div class="map-controls">
+					<button type="button" id="map-fit" title="显示全部地点" aria-label="显示全部地点">
+						@Icon("ArrowsOut", 22)
 					</button>
-				</footer>
-				<div id="modal">@Modal(v)</div>
-				<div id="notice" aria-live="polite">@Notice(v)</div>
+					<button type="button" id="map-zoom-in" aria-label="放大地图">
+						@Icon("Plus", 24)
+					</button>
+					<button type="button" id="map-zoom-out" aria-label="缩小地图">
+						@Icon("Minus", 24)
+					</button>
+				</div>
+				<div id="picker-banner">
+					@Picker(v)
+				</div>
+				<div class="search-dock">
+					<div id="search">
+						@Search(v)
+					</div>
+				</div>
+				<div id="modal">
+					@Modal(v)
+				</div>
+				<div id="notice" aria-live="polite">
+					@Notice(v)
+				</div>
 				<dialog class="app-dialog" id="help-dialog">
 					<div class="dialog-heading">
 						<h2>几程使用说明</h2>
@@ -92,10 +104,11 @@ templ Page(v View) {
 							@Icon("X", 21)
 						</button>
 					</div>
-					<p>搜索或在地图上选点，设置一个出发地和多个目的地。点击顶部页签切换出发地，目的地保持不变。</p>
-					<p>自行车与电动车分别规划。点击目的地耗时，选择高德返回的备选路线，地图和表格同步更新。</p>
-					<p>驾车默认高德推荐，也可选择躲避拥堵、速度优先、少收费或不走高速。预计耗时受道路、班次和服务覆盖范围影响。</p>
-					<p>地点保留在当前页面会话中，刷新后清空。百度与开源方案尚未接入。</p>
+					<p>在下方搜索一个地点，点选搜索结果，再选择“设为起点”或“设为终点”。也可以直接点击地图选点。</p>
+					<p>可以添加多个起点和多个终点。每次选中一个起点，所有起点共用终点列表；切换起点后自动更新路线和耗时。</p>
+					<p>点击终点卡片中的交通方式，查看距离、预计耗时和可选路线。各个终点独立规划，不是依次途经。</p>
+					<p>自行车与电动车分别查询。驾车可选择高德推荐、躲避拥堵等偏好。预计耗时受道路、班次和服务覆盖范围影响。</p>
+					<p>地点保留在当前页面会话中，刷新后清空。数据来源：高德地图。</p>
 					<div class="dialog-actions"><button type="button" class="primary-button" data-close-help>知道了</button></div>
 				</dialog>
 			</main>
@@ -104,211 +117,199 @@ templ Page(v View) {
 }
 
 templ Origins(v View) {
-	<section class="origin-toolbar" aria-label="出发地管理">
-		<span class="toolbar-label">出发地</span>
-		<div class="origin-tabs" role="tablist" aria-label="选择出发地">
+	<section class="origins-section" data-place-count={ Number(len(v.Origins) + len(v.Destinations)) } aria-label="起点管理">
+		<div class="section-caption">
+			<span>起点 <b>{ Number(len(v.Origins)) }</b></span>
+			<button type="button" class="text-button" data-search-focus disabled?={ !v.WebConfigured } aria-label="搜索并添加起点">
+				@Icon("Plus", 16)
+				添加
+			</button>
+		</div>
+		<div class="origin-tabs" role="tablist" aria-label="选择起点">
 			for _,p := range v.Origins {
-				<div class={ "origin-tab-wrap", templ.KV("active",p.ID==v.ActiveID) }>
-					<button type="button" role="tab" class="origin-tab" aria-selected={ fmt.Sprint(p.ID == v.ActiveID) } title={ p.Address } hx-post="/ui/activate-origin" hx-vals={ Values("id", p.ID) } hx-sync="#route-sync:replace">{ p.Name }</button>
-					if p.ID==v.ActiveID {
-						<div class="origin-tab-actions">
-							<button type="button" class="icon-button" aria-label={ "编辑" + p.Name } hx-post="/ui/open-editor" hx-vals={ Values("kind", "origin", "id", p.ID) } hx-sync="#editor-sync:replace">
-								@Icon("PencilSimple", 18)
-							</button>
-							<button
-								type="button"
-								class="icon-button"
-								aria-label={ "删除" + p.Name }
-								hx-post="/ui/delete-place"
-								hx-vals={ Values("kind", "origin", "id", p.ID) }
-								hx-sync="#route-sync:replace"
-							>
-								@Icon("X", 18)
-							</button>
-						</div>
-					}
-				</div>
-			}
-			if len(v.Origins)==0 {
-				<span class="no-origin-label">搜索地点，或添加一个出发地</span>
+				<button type="button" role="tab" class={ "origin-tab",templ.KV("active",p.ID==v.ActiveID) } aria-selected={ fmt.Sprint(p.ID == v.ActiveID) } title={ p.Address } hx-post="/ui/activate-origin" hx-vals={ Values("id", p.ID) } hx-sync="#route-sync:replace">
+					@Icon("MapPin", 15)
+					<span>{ p.Name }</span>
+				</button>
 			}
 		</div>
-		<button type="button" class="text-button add-origin" disabled?={ !v.WebConfigured } hx-post="/ui/open-editor" hx-vals={ Values("kind", "origin") } hx-sync="#editor-sync:replace">
-			@Icon("Plus", 21)
-			添加出发地
-		</button>
+		if v.Active()!=nil {
+			<div class="active-origin">
+				<span title={ v.Active().Address }>{ v.Active().Address }</span>
+				<button type="button" class="icon-button" aria-label={ "编辑起点" + v.Active().Name } hx-post="/ui/open-editor" hx-vals={ Values("kind", "origin", "id", v.ActiveID) } hx-sync="#editor-sync:replace">
+					@Icon("PencilSimple", 16)
+				</button>
+				<button type="button" class="icon-button" aria-label={ "删除起点" + v.Active().Name } hx-post="/ui/delete-place" hx-vals={ Values("kind", "origin", "id", v.ActiveID) } hx-sync="#route-sync:replace">
+					@Icon("X", 16)
+				</button>
+			</div>
+		} else {
+			<p class="section-empty">搜索一个地点，将它设为起点</p>
+		}
 	</section>
 }
 
 templ Search(v View) {
-	<form class="search-toolbar" hx-post="/ui/submit" hx-sync="#route-sync:replace" hx-indicator="#query-indicator">
-		<div class="search-combobox">
-			@Icon("MagnifyingGlass", 25)
-			<input
-				name="query"
-				id="origin-search"
-				aria-label="搜索出发地"
-				placeholder="搜索出发地，建议加上城市名"
-				value={ v.Query }
-				maxlength="100"
-				disabled?={ !v.WebConfigured }
-				autocomplete="off"
-				data-active-name={ activeName(v) }
-			/>
-			if v.SearchOpen {
-				<div class="search-options" role="listbox">
-					<div class="search-options-caption">选择准确的出发位置</div>
+	<div class="search-content" data-search-open={ fmt.Sprint(v.SearchOpen || v.Preview != nil) }>
+		if v.Preview!=nil {
+			<section class="place-preview" aria-label="地点详情">
+				<div class="preview-heading">
+					<span>地点详情</span>
+					<button type="button" class="icon-button" aria-label="关闭地点详情" hx-post="/ui/clear-search" hx-sync="#search-sync:replace">
+						@Icon("X", 19)
+					</button>
+				</div>
+				<h2>{ v.Preview.Name }</h2>
+				<p>{ v.Preview.Address }</p>
+				<div class="preview-actions">
+					<button type="button" class="primary-button" hx-post="/ui/assign-place" hx-vals={ Values("kind", "origin") } hx-sync="#route-sync:replace" hx-disabled-elt="this">
+						@Icon("MapPin", 18)
+						设为起点
+					</button>
+					<button type="button" class="secondary-button" hx-post="/ui/assign-place" hx-vals={ Values("kind", "destination") } hx-sync="#route-sync:replace" hx-disabled-elt="this">
+						@Icon("Path", 19)
+						设为终点
+					</button>
+				</div>
+				if len(v.Search)>0 {
+					<button type="button" class="text-button back-results" hx-post="/ui/back-search" hx-sync="#search-sync:replace">返回搜索结果</button>
+				}
+			</section>
+		} else if v.SearchOpen {
+			<section class="search-results" aria-label="地点搜索结果">
+				<div class="preview-heading">
+					<span>搜索结果 <b>{ Number(len(v.Search)) }</b></span>
+					<button type="button" class="icon-button" aria-label="关闭搜索结果" hx-post="/ui/clear-search" hx-sync="#search-sync:replace">
+						@Icon("X", 19)
+					</button>
+				</div>
+				<div class="search-options">
 					for i,p := range v.Search {
-						<button type="button" role="option" aria-selected="false" hx-post="/ui/select-origin" hx-vals={ Values("choice", Number(i)) } hx-sync="#route-sync:replace">
-							@Icon("MapPin", 18)
+						<button type="button" class="place-choice" hx-post="/ui/inspect-place" hx-vals={ Values("choice", Number(i)) } hx-sync="#search-sync:replace">
+							@Icon("MapPin", 22)
 							<span class="place-result-copy"><strong>{ p.Name }</strong><small>{ p.Address }</small></span>
+							@Icon("ArrowRight", 18)
 						</button>
 					}
-					if len(v.Search)==0 {
-						<p class="search-empty">没有找到地点，换个名称或加上城市再试。</p>
+					if v.SearchError!="" {
+						<p class="form-error" role="alert">{ v.SearchError }</p>
+					} else if len(v.Search)==0 {
+						<p class="search-empty">没有找到地点，试试加上城市名或在地图上选点。</p>
 					}
 				</div>
-			}
-		</div>
-		<div class="search-help"><span>搜索地点，或</span><button type="button" disabled?={ !v.MapConfigured||!v.WebConfigured } hx-post="/ui/start-pick" hx-vals={ Values("quick", "true") } hx-sync="#editor-sync:replace">在地图上选点</button></div>
-		<button type="submit" class="primary-button query-button" disabled?={ !v.WebConfigured }>
-			<span class="htmx-indicator" id="query-indicator">
-				@Icon("SpinnerGap", 20)
-			</span>
-			<span id="query-button-text">
-				if v.Active()!=nil {
-					查询路线
-				} else {
-					搜索地点
-				}
-			</span>
-		</button>
-	</form>
-}
-
-func activeName(v View) string {
-	if p := v.Active(); p != nil {
-		return p.Name
-	}
-	return ""
+			</section>
+		} else if len(v.Origins)==0&&len(v.Destinations)==0&&!v.Picking {
+			<div class="search-intro"><strong>从一个地点开始</strong><span>搜索或点击地图，设为起点或终点</span></div>
+		}
+		<form class="search-toolbar" hx-post="/ui/submit" hx-sync="#search-sync:replace" hx-indicator="#query-indicator" hx-disabled-elt="find button[type=submit]">
+			<label for="place-query" class="search-icon">
+				@Icon("MagnifyingGlass", 24)
+				<span class="sr-only">搜索地点</span>
+			</label>
+			<input id="place-query" name="query" aria-label="搜索地点" placeholder="搜索地点，设为起点或终点" value={ v.Query } maxlength="100" disabled?={ !v.WebConfigured } autocomplete="off" required/>
+			<button type="button" class="pick-button" title="在地图上选点" aria-label="在地图上选点" disabled?={ !v.MapConfigured||!v.WebConfigured } hx-post="/ui/start-pick" hx-vals={ Values("quick", "true") } hx-sync="#search-sync:replace">
+				@Icon("Crosshair", 22)
+			</button>
+			<button type="submit" class="primary-button query-button" disabled?={ !v.WebConfigured }>
+				<span class="htmx-indicator" id="query-indicator">
+					@Icon("SpinnerGap", 18)
+				</span><span>搜索</span>
+			</button>
+		</form>
+		if !v.WebConfigured {
+			<p class="configuration-note">地点查询服务尚未完成配置</p>
+		}
+	</div>
 }
 
 templ Preferences(v View) {
-	<section class="driving-preferences" aria-label="驾车路线偏好">
+	<div class="driving-preferences">
 		<label for="driving-policy">
-			@Icon("Car", 20)
+			@Icon("Car", 17)
 			驾车偏好
 		</label>
-		<select id="driving-policy" name="policy" hx-post="/ui/policy" hx-trigger="change" hx-sync="#route-sync:replace">
+		<select id="driving-policy" name="policy" aria-label="驾车偏好" hx-post="/ui/policy" hx-trigger="change" hx-sync="#route-sync:replace">
 			for _,p := range Policies {
 				<option value={ Number(p.ID) } selected?={ v.Policy==p.ID }>{ p.Name }</option>
 			}
 		</select>
-		<p>点击目的地耗时，可选择高德返回的备选路线</p>
-	</section>
+		<button type="button" class="icon-button refresh-routes" title="重新查询路线" aria-label="重新查询路线" disabled?={ !v.CanQuery()||v.Dirty } hx-post="/ui/refresh-routes" hx-sync="#route-sync:replace">
+			@Icon("Path", 19)
+		</button>
+	</div>
 }
 
 templ Results(v View) {
-	<section class="results-section" aria-label="目的地路线查询结果" aria-busy={ fmt.Sprint(v.Dirty) } aria-live="polite">
-		<div class="results-heading">
-			<h2>目的地与耗时</h2>
-			<p>点击时长，查看并选择路线</p>
-			<button type="button" class="text-button add-destination" disabled?={ !v.WebConfigured } hx-post="/ui/open-editor" hx-vals={ Values("kind", "destination") } hx-sync="#editor-sync:replace">
-				@Icon("Plus", 21)
-				添加目的地
+	<section class="results-section" aria-label="终点与耗时" aria-busy={ fmt.Sprint(v.Dirty) }>
+		<div class="section-caption">
+			<span>终点 <b>{ Number(len(v.Destinations)) }</b></span>
+			<button type="button" class="text-button" data-search-focus disabled?={ !v.WebConfigured } aria-label="搜索并添加终点">
+				@Icon("Plus", 16)
+				添加
 			</button>
-		</div>
-		<div class="results-table-scroll">
-			<table class="results-table">
-				<thead>
-					<tr>
-						<th scope="col" class="destination-column">目的地</th>
-						for _,mode := range Modes {
-							<th scope="col">
-								<span class="mode-heading">
-									@Icon(mode.Icon, 25)
-									{ mode.Name }
-								</span>
-							</th>
-						}
-						<th scope="col" class="actions-column"><span class="sr-only">地点操作</span></th>
-					</tr>
-				</thead>
-				<tbody>
-					for index,p := range v.Destinations {
-						<tr class={ templ.KV("focused-row", v.FocusID == p.ID) }>
-							<th scope="row"><button type="button" class="destination-name" title={ p.Address } hx-post="/ui/select-mode" hx-vals={ Values("id", p.ID, "mode", p.Mode) }><span class="destination-letter" style={ "background:" + p.ColorValue() }>{ Letter(index) }</span><span>{ p.Name }</span></button></th>
-							for _,mode := range Modes {
-								<td>@TimeCell(v, p, mode)</td>
-							}
-							<td class="row-actions">
-								<button type="button" class="icon-button" aria-label={ "编辑" + p.Name } hx-post="/ui/open-editor" hx-vals={ Values("kind", "destination", "id", p.ID) } hx-sync="#editor-sync:replace">
-									@Icon("PencilSimple", 21)
-								</button>
-								<button
-									type="button"
-									class="icon-button"
-									aria-label={ "删除" + p.Name }
-									hx-post="/ui/delete-place"
-									hx-vals={ Values("kind", "destination", "id", p.ID) }
-									hx-sync="#route-sync:replace"
-								>
-									@Icon("X", 21)
-								</button>
-							</td>
-						</tr>
-					}
-				</tbody>
-			</table>
 		</div>
 		if len(v.Destinations)==0 {
 			<div class="destinations-empty">
-				@Icon("MapPin", 29)
-				<h3>添加一个目的地</h3>
-				<p>设置出发地和目的地后，比较不同出行方式的真实路线与预计耗时。</p>
-				<button
-					type="button"
-					class="primary-button"
-					disabled?={ !v.WebConfigured }
-					hx-post="/ui/open-editor"
-					hx-vals={ Values("kind", "destination") }
-					hx-sync="#editor-sync:replace"
-				>
-					@Icon("Plus", 18)
-					添加目的地
+				@Icon("Path", 32)
+				<h3>下一站，去哪里？</h3>
+				<p>在下方搜索地点，选择“设为终点”<br/>即可比较五种出行方式的耗时</p>
+				<button type="button" class="text-button" data-search-focus disabled?={ !v.WebConfigured }>
+					搜索一个终点
+					@Icon("ArrowRight", 16)
 				</button>
 			</div>
 		}
-		if !v.WebConfigured {
-			<p class="mode-availability-note">地图查询服务尚未完成配置。</p>
+		for index,p := range v.Destinations {
+			<article class={ "destination-card",templ.KV("focused-row",v.FocusID==p.ID) } style={ "--route-color:" + p.ColorValue() }>
+				<div class="destination-heading">
+					<span class="destination-letter">{ Letter(index) }</span>
+					<div><h3>{ p.Name }</h3><p title={ p.Address }>{ p.Address }</p></div>
+					<button type="button" class="icon-button" aria-label={ "编辑终点" + p.Name } hx-post="/ui/open-editor" hx-vals={ Values("kind", "destination", "id", p.ID) } hx-sync="#editor-sync:replace">
+						@Icon("PencilSimple", 16)
+					</button>
+					<button type="button" class="icon-button" aria-label={ "删除终点" + p.Name } hx-post="/ui/delete-place" hx-vals={ Values("kind", "destination", "id", p.ID) } hx-sync="#route-sync:replace">
+						@Icon("X", 16)
+					</button>
+				</div>
+				<div class="mode-times">
+					for _,mode := range Modes {
+						@TimeCell(v, p, mode)
+					}
+				</div>
+				if v.Active()==nil {
+					<p class="destination-note">添加一个起点后，自动查询路线</p>
+				} else if v.Cell(p.ID,p.Mode).Success() {
+					<p class="destination-note">{ maps.DistanceLabel(v.Cell(p.ID,p.Mode).Selected().Distance) }<span>点击耗时，查看路线方案</span></p>
+				}
+			</article>
 		}
 		if v.Dirty&&v.CanQuery() {
 			<div class="query-loader" hx-post="/ui/query" hx-trigger="load" hx-sync="#route-sync:replace" role="status">
-				@Icon("SpinnerGap", 17)
-				<span>正在查询路线…</span>
+				@Icon("SpinnerGap", 16)
+				<span>正在查询各个终点的路线…</span>
 			</div>
 		}
 		if v.QueriedAt!="" {
-			<p class="query-timestamp">查询时间：{ v.QueriedAt } · 高德预计耗时</p>
+			<p class="query-timestamp">{ v.QueriedAt } 更新 · 高德预计耗时</p>
 		}
 	</section>
 }
 
 templ TimeCell(v View, p Place, mode Mode) {
-	<button type="button" class={ CellClass(p.Mode == mode.ID, v.Cell(p.ID, mode.ID)) } style={ "--route-color:" + p.ColorValue() + ";--route-tint:" + p.ColorValue() + "20" } disabled?={ !v.Cell(p.ID,mode.ID).Success() } aria-pressed={ fmt.Sprint(p.Mode == mode.ID && v.Cell(p.ID, mode.ID).Success()) } aria-label={ p.Name + "，" + mode.Name + "，" + TimeLabel(v.Cell(p.ID, mode.ID)) } title={ CellTitle(v.Cell(p.ID, mode.ID)) } hx-post="/ui/select-mode" hx-vals={ Values("id", p.ID, "mode", mode.ID) }>
-		if p.Mode==mode.ID&&v.Cell(p.ID,mode.ID).Success() {
-			@Icon("Check", 21)
+	<div class="mode-time">
+		<button type="button" class={ CellClass(p.Mode == mode.ID, v.Cell(p.ID, mode.ID)) } disabled?={ !v.Cell(p.ID,mode.ID).Success() } aria-pressed={ fmt.Sprint(p.Mode == mode.ID && v.Cell(p.ID, mode.ID).Success()) } aria-label={ p.Name + "，" + mode.Name + "，" + TimeLabel(v.Cell(p.ID, mode.ID)) } title={ CellTitle(v.Cell(p.ID, mode.ID)) } hx-post="/ui/select-mode" hx-vals={ Values("id", p.ID, "mode", mode.ID) }>
+			@Icon(mode.Icon, 21)
+			<span class="mode-name">{ mode.Name }</span><strong>{ TimeLabel(v.Cell(p.ID,mode.ID)) }</strong>
+		</button>
+		if v.Cell(p.ID,mode.ID).Status=="error" {
+			<span class="sr-only">{ v.Cell(p.ID,mode.ID).Reason }</span>
 		}
-		<span>{ TimeLabel(v.Cell(p.ID,mode.ID)) }</span>
-	</button>
-	if v.Cell(p.ID,mode.ID).Status=="error" {
-		<small class="cell-error-message">{ v.Cell(p.ID,mode.ID).Reason }</small>
-	}
+	</div>
 }
 
 templ Options(v View) {
 	if v.PanelPlace()!=nil&&v.PanelResult().Success() {
-		<section class="route-options-panel" aria-label={ v.PanelPlace().Name + "的备选路线" }>
+		<section class="route-options-panel" data-route-detail aria-label={ v.PanelPlace().Name + "的备选路线" }>
 			<div class="route-options-heading">
 				<div>
 					<h2>
@@ -328,8 +329,8 @@ templ Options(v View) {
 						}
 					</p>
 				</div>
-				<button type="button" class="icon-button" aria-label="收起备选路线" hx-post="/ui/close-options">
-					@Icon("X", 20)
+				<button type="button" class="icon-button" aria-label="返回全部终点" hx-post="/ui/close-options">
+					@Icon("ArrowRight", 20)
 				</button>
 			</div>
 			<div class="route-option-cards">

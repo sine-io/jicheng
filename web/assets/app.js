@@ -2,7 +2,7 @@
   'use strict';
   const colors = ['#1680ff', '#ff8914', '#29b538', '#9867d8', '#e05c83', '#0a9f99', '#a47529', '#4668d2'];
   const modes = {driving:'驾车', transit:'公交', cycling:'自行车', electric:'电动车', walking:'步行'};
-  let map, sdk, overlays = [], currentState, pendingRefresh, requestVersion = 0, lastFit = '', mapRequest, pickBusy = false;
+  let map, sdk, overlays = [], currentState, pendingRefresh, requestVersion = 0, lastFit = '', mapRequest, pickBusy = false, panelCollapsed = false, toastTimer;
   const meta = () => Object.fromEntries(new FormData(document.getElementById('workspace-meta')));
   const selected = result => result?.alternatives?.find(route => route.id === result.selectedId) || result?.alternatives?.[0];
   function action(name, values = {}) {
@@ -43,13 +43,29 @@
       });
     }, 45);
   }
-  function pin(color, text) {
-    const node = document.createElement('div'); node.className='native-pin';
-    const svg = document.createElementNS('http://www.w3.org/2000/svg','svg'); svg.setAttribute('viewBox','0 0 38 48');
-    const path = document.createElementNS('http://www.w3.org/2000/svg','path');
-    path.setAttribute('d','M19 1C9 1 2 8 2 18c0 13 17 28 17 28s17-15 17-28C36 8 29 1 19 1Z'); path.setAttribute('fill',color); path.setAttribute('stroke','#fff'); path.setAttribute('stroke-width','2');
-    const dot = document.createElementNS('http://www.w3.org/2000/svg','circle'); dot.setAttribute('cx','19'); dot.setAttribute('cy','18'); dot.setAttribute('r','7'); dot.setAttribute('fill',color);
-    svg.append(path,dot); const label=document.createElement('span'); label.textContent=text; node.append(svg,label); return node;
+  function pin(color, text, extra = '') {
+    const node = document.createElement('div'); node.className = 'native-pin ' + extra;
+    node.style.setProperty('--pin-color', color); node.textContent = text; return node;
+  }
+  function fitPadding() {
+    const panel = document.getElementById('route-sidebar'), dock = document.querySelector('.search-dock');
+    const bottom = Math.min(dock.getBoundingClientRect().height + 70, innerHeight * .48);
+    const mobile = innerWidth <= 760;
+    const top = mobile && !panel.hidden ? Math.min(panel.getBoundingClientRect().bottom + 18, innerHeight - bottom - 150) : 100;
+    // AMap expects top, bottom, left, right, rather than CSS inset order.
+    return [Math.max(75, top), bottom, !mobile && !panel.hidden ? panel.getBoundingClientRect().right + 40 : 45, mobile ? 115 : 220];
+  }
+  function syncUI() {
+    const count = Number(document.querySelector('[data-place-count]')?.dataset.placeCount || 0);
+    const searching = document.querySelector('[data-search-open]')?.dataset.searchOpen === 'true';
+    const panel = document.getElementById('route-sidebar'), toggle = document.getElementById('panel-toggle');
+    panel.hidden = !count || panelCollapsed || (innerWidth <= 760 && searching);
+    toggle.hidden = !count || !panel.hidden;
+    toggle.setAttribute('aria-expanded', String(!panel.hidden));
+    document.getElementById('place-count').textContent = count + ' 个地点';
+    document.getElementById('route-app').classList.toggle('panel-open', !panel.hidden);
+    document.getElementById('route-app').classList.toggle('searching', searching);
+    document.querySelector('.refresh-routes')?.toggleAttribute('disabled', document.querySelector('[aria-busy="true"]') !== null || !currentState?.origin || !currentState?.destinations?.length);
   }
   function draw() {
     if (!map || !sdk || !currentState) return;
@@ -64,27 +80,42 @@
           items.push(line); if (state.focusId===destination.id) focused.push(line);
         }
       }
-      const marker=new sdk.Marker({position:destination.point,content:pin(color,destination.letter),offset:new sdk.Pixel(-19,-45),title:destination.name,bubble:false,zIndex:isFocus?120:110});
+      const marker=new sdk.Marker({position:destination.point,content:pin(color,destination.letter),offset:new sdk.Pixel(-16,-16),title:destination.name,bubble:false,zIndex:isFocus?120:110});
       const label=document.createElement('div'); label.className='map-pin-label';
       const name=document.createElement('strong'); name.textContent=destination.name;
       const time=document.createElement('span'); time.className='map-pin-time'; time.style.color=color;
       const value=!state.origin?'待设置出发地':result?.status==='success'?route.minutes+'分钟':result?.status==='pending'?'查询中…':result?.status==='no-route'?'暂无路线':result?.status==='error'?'查询失败':'待查询';
       time.textContent=(modes[destination.mode] || '')+' '+value; label.append(name,time);
       marker.setLabel({direction:'right',offset:new sdk.Pixel(6,-14),content:label.outerHTML});
-      marker.on('click',()=>{if (!currentState?.picking && result?.status==='success') action('select-mode',{id:destination.id,mode:destination.mode});});
+      marker.on('click',()=>{if (!currentState?.picking && result?.status==='success') {panelCollapsed=false; syncUI(); action('select-mode',{id:destination.id,mode:destination.mode});}});
       items.push(marker); if (state.focusId===destination.id) focused.push(marker);
     }
     if (state.origin) {
-      const marker=new sdk.Marker({position:state.origin.point,content:pin('#15354e','起'),offset:new sdk.Pixel(-19,-45),title:state.origin.name,zIndex:150});
+      const marker=new sdk.Marker({position:state.origin.point,content:pin('#15354e','起'),offset:new sdk.Pixel(-16,-16),title:state.origin.name,zIndex:150,bubble:false});
       const label=document.createElement('strong'); label.className='map-place-origin'; label.textContent=state.origin.name;
       marker.setLabel({direction:'bottom',offset:new sdk.Pixel(0,5),content:label.outerHTML}); items.push(marker); if (state.focusId) focused.push(marker);
     }
+    for (const [index, origin] of (state.origins || []).entries()) {
+      if (origin.id === state.origin?.id) continue;
+      const marker = new sdk.Marker({position:origin.point, content:pin('#708b8e','起'+(index+1),'inactive'), offset:new sdk.Pixel(-16,-16), title:origin.name, bubble:false, zIndex:100});
+      marker.on('click',()=>{panelCollapsed=false; action('activate-origin',{id:origin.id});});
+      items.push(marker);
+    }
+    let previewMarker;
+    if (state.preview) {
+      const content = pin('#087f83','', 'preview');
+      const icon = document.createElementNS('http://www.w3.org/2000/svg','svg'); icon.setAttribute('width','23'); icon.setAttribute('height','23'); icon.setAttribute('viewBox','0 0 256 256'); icon.setAttribute('fill','currentColor');
+      const use = document.createElementNS('http://www.w3.org/2000/svg','use'); use.setAttribute('href','/assets/icons.svg#MapPin'); icon.append(use); content.append(icon);
+      previewMarker = new sdk.Marker({position:state.preview.point,content,offset:new sdk.Pixel(-18,-18),title:state.preview.name,bubble:false,zIndex:200});
+      items.push(previewMarker);
+    }
     overlays=items; if (items.length) map.add(items);
-    const signature=JSON.stringify([state.revision,state.origin?.id,state.focusId,(state.destinations||[]).map(d=>[d.id,d.point,d.mode,d.route?.status,selected(d.route)?.id])]);
-    if (signature!==lastFit && items.length) {map.setFitView(focused.length?focused:items,false,[60,90,70,70],16);lastFit=signature;}
+    syncUI();
+    const signature=JSON.stringify([state.revision,state.origin?.id,state.preview?.point,state.focusId,(state.destinations||[]).map(d=>[d.id,d.point,d.mode,d.route?.status,selected(d.route)?.id])]);
+    if (signature!==lastFit && items.length) {map.setFitView(previewMarker?[previewMarker]:focused.length?focused:items,false,fitPadding(),16);lastFit=signature;}
     map.setDefaultCursor(state.picking?'crosshair':'grab');
-    document.getElementById('map-empty').hidden=!!state.origin || !!state.destinations?.length || state.picking;
   }
+
   function loadMap() {
     requestJSON('/api/maps/config',(error,config)=>{
       if (error || !config?.jsKey) {mapFailure('地图服务尚未完成配置'); return;}
@@ -97,11 +128,11 @@
           map=new sdk.Map('route-map',{viewMode:'2D',center:[117.200,39.125],zoom:11,resizeEnable:true});
           map.on('complete',()=>{document.getElementById('map-status').textContent='已接入';document.getElementById('map-status-dot').classList.add('ready');});
           map.on('click',event=>{
-            if (!currentState?.picking || pickBusy) return;
-            pickBusy=true; action('pick',{point:event.lnglat.getLng().toFixed(6)+','+event.lnglat.getLat().toFixed(6)}).finally(()=>{pickBusy=false;});
+            if (pickBusy || document.querySelector('dialog[open]')) return;
+            pickBusy=true; action(currentState?.picking?'pick':'inspect-point',{point:event.lnglat.getLng().toFixed(6)+','+event.lnglat.getLat().toFixed(6)}).finally(()=>{pickBusy=false;});
           });
           document.getElementById('map-loading').hidden=true;
-          document.getElementById('map-fit').onclick=()=>{if(overlays.length)map.setFitView(overlays,false,[60,90,70,70],16);};
+          document.getElementById('map-fit').onclick=()=>{if(overlays.length)map.setFitView(overlays,false,fitPadding(),16);};
           document.getElementById('map-zoom-in').onclick=()=>map.zoomIn();
           document.getElementById('map-zoom-out').onclick=()=>map.zoomOut();
           draw();
@@ -120,6 +151,10 @@
     }
   }
   document.addEventListener('click',event=>{
+    if(event.target.closest('[data-search-focus]')) { document.getElementById('place-query').focus(); document.getElementById('place-query').select(); if(innerWidth<=760) {panelCollapsed=true; syncUI();} }
+    if(event.target.closest('[data-collapse-panel]')) {panelCollapsed=true; syncUI();}
+    if(event.target.closest('#panel-toggle')) {panelCollapsed=false; if(innerWidth<=760 && document.querySelector('[data-search-open]')?.dataset.searchOpen==='true') action('clear-search'); syncUI();}
+    if(event.target.closest('[hx-post="/ui/assign-place"]')) panelCollapsed=false;
     if(event.target.closest('[data-open-help]'))document.getElementById('help-dialog').showModal();
     if(event.target.closest('[data-close-help]'))document.getElementById('help-dialog').close();
   });
@@ -127,18 +162,24 @@
     if(event.key==='Enter' && event.target.matches('[data-search-on-enter]')){
       event.preventDefault();const form=document.getElementById('place-form');action('search-editor',Object.fromEntries(new FormData(form)));
     }
-    if(event.key==='Escape' && currentState?.picking)action('cancel-pick');
+    if(event.key==='Escape' && !document.querySelector('dialog[open]')) {if(currentState?.picking)action('cancel-pick');else if(document.querySelector('[data-search-open]')?.dataset.searchOpen==='true')action('clear-search');}
   });
-  document.addEventListener('input',event=>{
-    if(event.target.id==='origin-search'){
-      const input=event.target;document.getElementById('query-button-text').textContent=input.value.trim() && input.value.trim()!==input.dataset.activeName?'搜索地点':'查询路线';
+  document.addEventListener('htmx:afterSettle',()=>{initializeDialogs();syncUI();});
+  document.addEventListener('htmx:oobAfterSwap',event=>{
+    initializeDialogs();syncUI();
+    if(event.detail.target?.id==='notice') {
+      clearTimeout(toastTimer); const notice = document.getElementById('notice');
+      toastTimer=setTimeout(()=>notice.replaceChildren(),5500);
     }
+    if(event.detail.target?.id==='route-options') document.querySelector('.sidebar-scroll').scrollTop=0;
   });
-  document.addEventListener('htmx:afterSettle',()=>{initializeDialogs();});
-  document.addEventListener('htmx:oobAfterSwap',()=>{initializeDialogs();});
+  document.addEventListener('htmx:beforeRequest',event=>{
+    if(event.detail.elt?.matches('.search-toolbar')) document.getElementById('place-query')?.blur();
+  });
+  window.addEventListener('resize',syncUI);
   document.addEventListener('route:updated',refreshMap);
   document.addEventListener('htmx:responseError',event=>notify(event.detail.xhr.status===403?'页面会话已过期，请刷新后重试':'操作失败，请稍后重试'));
   document.addEventListener('htmx:sendError',()=>notify('网络连接失败，请稍后重试'));
   // Page layout and map instance remain mounted across every htmx update.
-  refreshMap(); loadMap(); initializeDialogs();
+  syncUI(); refreshMap(); loadMap(); initializeDialogs();
 })();

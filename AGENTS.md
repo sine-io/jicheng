@@ -2,9 +2,10 @@
 
 ## Product decisions
 
-- Product name: **几程** (Jicheng). Page title: **几程 · 多目的地路线查询**. Use `jicheng` for the Go module, binary and release directory. The name is a creative naming choice, not a verbatim quotation from Nalan Xingde.
+- Product name: **几程** (Jicheng). Page title: **几程 · 多起点多终点地图**. Use `jicheng` for the Go module, binary and release directory. The name is a creative naming choice, not a verbatim quotation from Nalan Xingde.
 
-- Visual reference: `reference/selected-design.png`. Keep the chosen top origin tabs, search row, wide map, teal palette and five-mode time table.
+- Current visual reference: `reference/map-first-sketch.png`. The map fills the viewport, a single general place search floats near the bottom, and route/origin/destination controls live in a collapsible floating panel. Retain the teal identity and Phosphor icons. `reference/selected-design.png` is a historical reference only.
+- Search and direct map clicks preview a place; only explicit “设为起点” / “设为终点” saves it. Adding an origin appends and activates it, never silently replaces the previous origin. Shared destinations are independent trips, not waypoints. Duplicate assignment in the same list reuses the existing place.
 - Generic origins/destinations only. No family roles, house hunting, scores, schedules or sequential trips.
 - Multiple origin tabs, exactly one active origin, shared destinations. Begin with empty locations. Refresh creates a new page workspace; persistence was not requested.
 - Only AMap is implemented. Keep Baidu and open-source options disabled until genuinely integrated.

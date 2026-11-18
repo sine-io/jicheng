@@ -37,9 +37,9 @@ type Editor struct {
 
 func (e Editor) KindName() string {
 	if e.Kind == "origin" {
-		return "出发地"
+		return "起点"
 	}
-	return "目的地"
+	return "终点"
 }
 func (e Editor) Title() string {
 	prefix := "添加"
@@ -55,6 +55,8 @@ type View struct {
 	ActiveID, Query              string
 	Search                       []maps.Place
 	SearchOpen                   bool
+	Preview                      *maps.Place
+	SearchError                  string
 	Results                      map[string]map[string]maps.Result
 	Policy                       int
 	Dirty                        bool
@@ -166,6 +168,9 @@ func RouteSelected(result maps.Result, id string) bool {
 }
 
 func pickLabel(v View) string {
+	if v.PickKind == "" {
+		return "点击地图选择地点，再设为起点或终点"
+	}
 	if v.PickKind == "origin" {
 		return "点击地图，设置出发地"
 	}
