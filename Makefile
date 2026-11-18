@@ -1,4 +1,4 @@
-.PHONY: generate dev test build
+.PHONY: generate dev test build release
 
 generate:
 	./scripts/go-tool.sh tool templ generate
@@ -11,3 +11,6 @@ test:
 
 build:
 	./scripts/build.sh
+
+release:
+	./scripts/build-release.sh

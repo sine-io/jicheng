@@ -1,7 +1,7 @@
 package ui
 
 import "fmt"
-import "routeworkbench/internal/maps"
+import "jicheng/internal/maps"
 
 templ Icon(name string, size int) {
 	<svg width={ Number(size) } height={ Number(size) } viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><use href={ "/assets/icons.svg#" + name }></use></svg>
@@ -13,8 +13,9 @@ templ Page(v View) {
 		<head>
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<title>路线查询 · 多目的地路线工作台</title>
-			<meta name="description" content="切换出发地，比较多个目的地的路线和预计耗时"/>
+			<title>几程 · 多目的地路线查询</title>
+			<meta name="application-name" content="几程"/>
+			<meta name="description" content="几程：切换出发地，比较多个目的地的路线和预计耗时。把远近，换成时间。"/>
 			<link rel="stylesheet" href="/assets/styles.css"/><script src="/assets/htmx.min.js" defer></script>
 			<script src="/assets/app.js" defer></script>
 		</head>
@@ -27,9 +28,9 @@ templ Page(v View) {
 				<header class="app-header">
 					<div class="brand">
 						@Icon("Path", 46)
-						<h1>路线查询</h1>
+						<h1>几程</h1>
 					</div>
-					<p class="brand-subtitle">切换出发地，查看多目的地路线</p>
+					<p class="brand-subtitle">多目的地路线查询</p>
 					<div class="header-actions">
 						<details class="provider-control">
 							<summary class="provider-trigger">
@@ -86,7 +87,7 @@ templ Page(v View) {
 				<div id="notice" aria-live="polite">@Notice(v)</div>
 				<dialog class="app-dialog" id="help-dialog">
 					<div class="dialog-heading">
-						<h2>路线查询使用说明</h2>
+						<h2>几程使用说明</h2>
 						<button type="button" class="icon-button" data-close-help aria-label="关闭窗口">
 							@Icon("X", 21)
 						</button>

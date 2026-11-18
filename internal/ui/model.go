@@ -3,7 +3,7 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
-	"routeworkbench/internal/maps"
+	"jicheng/internal/maps"
 )
 
 type Mode struct{ ID, Name, Icon string }

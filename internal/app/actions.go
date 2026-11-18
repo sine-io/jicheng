@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"routeworkbench/internal/maps"
-	"routeworkbench/internal/ui"
+	"jicheng/internal/maps"
+	"jicheng/internal/ui"
 )
 
 var allTargets = []string{"origins", "search", "preferences", "results", "route-options", "modal", "picker-banner", "notice"}

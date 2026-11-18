@@ -89,7 +89,7 @@
     requestJSON('/api/maps/config',(error,config)=>{
       if (error || !config?.jsKey) {mapFailure('地图服务尚未完成配置'); return;}
       window._AMapSecurityConfig={serviceHost:location.origin+'/_AMapService'};
-      const script=document.createElement('script'), callback='__routeWorkbenchReady';
+      const script=document.createElement('script'), callback='__jichengMapReady';
       const timer=setTimeout(()=>mapFailure('高德地图加载超时，请检查网络后重试'),22000);
       window[callback]=()=>{
         clearTimeout(timer); delete window[callback]; sdk=window.AMap;

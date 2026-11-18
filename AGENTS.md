@@ -1,6 +1,8 @@
-# Route Workbench Instructions
+# 几程 (Jicheng) Project Instructions
 
 ## Product decisions
+
+- Product name: **几程** (Jicheng). Page title: **几程 · 多目的地路线查询**. Use `jicheng` for the Go module, binary and release directory. The name is a creative naming choice, not a verbatim quotation from Nalan Xingde.
 
 - Visual reference: `reference/selected-design.png`. Keep the chosen top origin tabs, search row, wide map, teal palette and five-mode time table.
 - Generic origins/destinations only. No family roles, house hunting, scores, schedules or sequential trips.

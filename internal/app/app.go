@@ -17,9 +17,9 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/gin-gonic/gin"
-	"routeworkbench/internal/maps"
-	"routeworkbench/internal/ui"
-	"routeworkbench/web"
+	"jicheng/internal/maps"
+	"jicheng/internal/ui"
+	"jicheng/web"
 )
 
 type Provider interface {

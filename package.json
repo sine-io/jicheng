@@ -1,9 +1,9 @@
 {
-  "name": "route-workbench-go",
+  "name": "jicheng",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Native Go + Gin + templ + htmx; scripts integrate the managed preview only.",
+  "description": "几程 · 多目的地路线查询 — Go + Gin + templ + htmx",
   "scripts": {
     "dev": "./scripts/dev.sh",
     "build": "./scripts/build.sh",

@@ -1,6 +1,10 @@
-# 多目的地路线查询
+# 几程 · 多目的地路线查询
 
-原项目已迁移到 **Go + Gin + templ + htmx**。沿用顶部出发地页签、真实地图、目的地耗时表的布局。
+**把远近，换成时间。**
+
+几程是一款比较多个目的地路线和耗时的小工具，采用 **Go + Gin + templ + htmx**。顶部切换出发地，地图和目的地耗时表同步更新。
+
+完整交付包包含全部源码、生成的 templ 组件、静态资源、测试、Docker/Compose 配置和运行说明，同时附带 Windows x64、Linux x64 的可执行文件。快速运行见 [QUICKSTART.md](QUICKSTART.md)。
 
 ## 技术栈
 
@@ -67,7 +71,7 @@ go vet -tags nomsgpack ./...
 make build
 ```
 
-产物 `bin/route-workbench` 已内嵌页面样式、htmx、图标与地图脚本，运行时不依赖 Node.js。`nomsgpack` 只跳过本项目未使用的 Gin MsgPack 支持。
+产物 `bin/jicheng` 已内嵌页面样式、htmx、图标与地图脚本，运行时不依赖 Node.js。`nomsgpack` 只跳过本项目未使用的 Gin MsgPack 支持。
 
 测试使用明确的 mock 服务，覆盖模板片段、五模式多目的地查询、备选路线选择、删除撤销、旧查询取消、同会话刷新隔离、CSRF、输出转义与供应商数据解析。真实高德联调结果见 `design-qa.md`。
 

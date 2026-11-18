@@ -1,4 +1,4 @@
-module routeworkbench
+module jicheng
 
 go 1.27.0
 

@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"routeworkbench/internal/app"
+	"jicheng/internal/app"
 )
 
 func main() {
@@ -28,7 +28,7 @@ func main() {
 		defer cancel()
 		_ = server.Shutdown(ctx)
 	}()
-	slog.Info("route workbench listening", "address", address, "mapConfigured", config.JSKey != "" && config.SecurityCode != "", "routingConfigured", config.WebKey != "")
+	slog.Info("jicheng listening", "address", address, "mapConfigured", config.JSKey != "" && config.SecurityCode != "", "routingConfigured", config.WebKey != "")
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
