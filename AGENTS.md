@@ -1,20 +1,39 @@
 # Route Workbench Instructions
 
-## Selected product direction
+## Product decisions
 
-- Source of truth: reference/selected-design.png, the first image of the latest generic-route ideation set.
-- Generic places only. Do not introduce family roles, house hunting, scores, schedules, or sequential trips.
-- Multiple origin tabs, exactly one active origin, shared destinations, map above transport-time table.
-- AMap JS API 2.0 is connected through a same-origin Worker proxy. User-owned runtime settings are AMAP_JS_KEY and AMAP_JS_SECURITY_CODE. Never commit credential values or return the security code to the browser.
-- Use real POIs, GCJ-02 geographic coordinates, and provider route times/paths. Never silently substitute fixture data or estimates.
-- Baidu and open-source providers remain disabled until actually configured and implemented.
-- Bicycle and electric bicycle must remain distinct; never estimate one from the other. Preserve all usable alternatives returned by the provider. Driving defaults to v3 strategy 10 (高德推荐); allow 12, 0, 14, 13 as named preferences. Selected alternative must update time, distance, route geometry and toll data together.
-- Start with empty locations. One active origin, shared destinations, with driving, transit, bicycle, electric bicycle, and walking columns. Electric bicycle stays explicitly unavailable until AMAP_WEB_SERVICE_KEY is configured. No persistence was requested; locations remain in current-page memory.
+- Visual reference: `reference/selected-design.png`. Keep the chosen top origin tabs, search row, wide map, teal palette and five-mode time table.
+- Generic origins/destinations only. No family roles, house hunting, scores, schedules or sequential trips.
+- Multiple origin tabs, exactly one active origin, shared destinations. Begin with empty locations. Refresh creates a new page workspace; persistence was not requested.
+- Only AMap is implemented. Keep Baidu and open-source options disabled until genuinely integrated.
+- Use real POIs, GCJ-02 coordinates, provider durations and paths. No simulated times, speed conversions or straight-line substitutes.
+- Bicycle and electric bicycle use independent APIs. Keep every usable provider alternative in provider order. Update duration, distance, geometry and toll data together.
+- Driving defaults to v3 strategy 10; named choices 12/0/14/13 remain available.
 
-Run the local server yourself and open the preview in the browser available to this environment. Do not give the user server-start instructions when you can run it.
+## Required stack
 
-Before making substantial visual changes, use the Product Design plugin's `get-context` skill when the visual source is unclear or no longer matches the current goal. When the user gives durable prototype-specific design feedback, preferences, or decisions, record them in `AGENTS.md`.
+- The user explicitly selected **Go + Gin + templ + htmx**. Do not restore React/Vite or switch frameworks.
+- Initial page is server-rendered. All business actions use htmx 2.x XMLHttpRequest and targeted HTML fragments, without replacing the whole document or the `#route-map` node.
+- Go owns location, query and selected-route state. Plain JavaScript owns only map rendering and UI glue. Keep a single AMap instance across partial updates.
+- `internal/ui/page.templ` is the source; regenerate and commit `page_templ.go` together. Keep version-pinned `go tool templ` in go.mod.
+- Cancel outdated queries and guard revisions. Initialize all destination result rows before concurrent writes; run the race detector for changes to query/state code.
+- Each page workspace belongs to its HttpOnly browser session and requires its CSRF token for writes. Keep user-provided text escaped in HTML and map labels.
+- Read AMap keys only from runtime environment. JS security code and Web-service Key must never appear in frontend config, source, test snapshots, request logs or error URLs.
 
-When implementing from a selected generated mock, treat that image as the source of truth for layout, component anatomy, density, spacing, color, typography, visible content, and hierarchy.
+## Runtime and hosting
 
-Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts/prepare-sites-build.mjs`, and the static asset/SPA fallback contract intact so the same local prototype can be handed to Sites. Before a Sites handoff, run `npm run build`, `npm run test:sites`, and `npm run test:maps`; the build must leave `dist/client/index.html`, `dist/server/index.js`, and `dist/.openai/hosting.json`.
+- Build an actual native Go server with embedded assets. Go 1.27+, Gin 1.12.0, templ 0.3.1118, vendored htmx 2.0.11.
+- `make dev` starts the native app. In this workspace use the Sites managed preview CLI and its exact URL; do not start a second competing dev server.
+- `package.json` is only managed-preview orchestration, not a frontend build dependency. `worker/index.js` is only an optional gateway to an independently hosted Go process.
+- The existing Sites runtime cannot directly execute Go. Do not publish the gateway until `GO_APP_ORIGIN` and `GO_PROXY_TOKEN` are configured and verified. Preserve `.openai/hosting.json` project identity and existing Site audience.
+- Source migration and production deployment are distinct. Report actual deployment status; do not imply that a saved source version is already running online.
+
+## Checks
+
+- `go tool templ generate`
+- `GOMAXPROCS=4 go test -race -p 2 -tags nomsgpack ./...`
+- `go vet -tags nomsgpack ./...`
+- `node --test tests/gateway.test.mjs`
+- `make build`
+
+`scripts/go-tool.sh` resolves Go via `GO_BINARY`, ignored `.go-toolchain`, or PATH. Use it when the environment's `go` command is not the Go language SDK. Keep development secrets, binaries, dist, SDKs and transient browser artifacts out of Git and source archives. `reference/native-go-preview.jpg` is an intentional verification snapshot. Validate real map/search/query behavior in the browser when runtime credentials are available and record evidence and limits in `design-qa.md`.

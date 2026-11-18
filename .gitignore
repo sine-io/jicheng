@@ -8,3 +8,6 @@ dist/
 .DS_Store
 .openai/preview*
 qa-evidence/
+.go-toolchain
+bin/
+*.test

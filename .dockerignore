@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+!.env.example
+.go-toolchain
+node_modules
+dist
+bin
+qa-evidence
+reference
+*.log

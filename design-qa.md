@@ -1,59 +1,55 @@
-# AMap integration QA — 2026-11-16
+# Gin + templ + htmx 迁移验证 — 2026-11-16
 
-Reference: reference/selected-design.png. Retained the chosen top origin tabs, search row, wide map, four-mode destinations table, teal palette, typography hierarchy, and responsive layout. Replaced demo provider/status/content with real AMap integration and an empty starting state.
+## 实现
 
-## Browser observations
+- 原生 Go 1.27.4、Gin 1.12.0、templ 0.3.1118、htmx 2.0.11。
+- 保留确认过的出发地页签、搜索、地图、五种交通方式表格和青绿色视觉。
+- React/Vite 源码、前端依赖、旧 Worker 业务与对应测试已移除。Worker 仅保留可选 Go 网关。
+- 首次访问 SSR；业务操作返回指定区域的 HTML 片段，htmx 2.x 使用 XMLHttpRequest。响应不包含页面外壳或地图节点。
+- Go 保存每个页面的工作区和查询状态；原生 JavaScript 维持一个高德地图实例、标记和分段路径。
 
-Managed preview successfully opened at the exact CLI URL http://127.0.0.1:4173/ using CUA. Inspected the desktop screenshot, map error state, provider menu, and usage dialog. The local preview has no production credentials: controls are disabled and the connection error is explicit. Baidu and open-source providers are disabled. The usage dialog explains one active origin/shared destinations and page-only state. No raw exception text is shown after the loader fix.
+## 浏览器联调
 
-Full real-map browser flow and responsive loaded-map screenshots remain unverified until an authenticated live browser can access the deployed Site. Do not claim that this local error-state check verifies real POI search, map rendering, or route interaction.
+使用 Sites 管理的原生 Go 预览，浏览器打开 CLI 返回的准确 URL `http://127.0.0.1:4173/`。临时运行时配置只提供给当前开发进程，未进入源码、截图或打包文件。
 
-## Automated checks
+已观察到：
 
-- Production build and required Worker/client/manifest outputs.
-- Static asset and SPA fallback behavior retained.
-- Runtime JS-key-only config; security code not returned to client.
-- Fixed high-trust upstream allowlist; client key/jscode overridden; no Cookie/authorization forwarded.
-- Upstream failures do not echo sensitive URLs.
-- SDK coordinate, actual POI, route time and path normalization for all four modes.
-- Transit walking/ride segments remain separate; no invented road connections.
-- Missing data yields no-route/error, never simulated times or straight-line routes.
-- All four JS route services receive the chosen origin/destination; transit receives city metadata.
-- Aborted queued jobs do not issue stale-origin queries.
+- 真实高德底图加载、地图服务状态变为“已接入”。
+- 顶部搜索“天津站”，选择高德返回的实际地址。
+- 在弹窗中搜索并添加“天津·海河意式风情区”。
+- 五种交通方式都返回独立结果。首轮天津站到意式风情区的示例为驾车 9 分钟、公交 19 分钟、自行车 6 分钟、电动车 8 分钟、步行 15 分钟；重启后的最终截图中驾车变为 8 分钟。数值只代表测试时的供应商结果，不代表固定时间。
+- 选择公交后展示 3 条真实方案；选择方案 2，表格由 19 分钟改为 30 分钟，方案距离由 1.3 公里改为 2.3 公里，地图路径同步变化。
+- 地图选点得到实际逆地理编码地址，命名“海河边选点”并添加为第二个目的地。
+- 搜索添加“天塔”为第二个出发地；两个共享目的地重新查询五种方式，页签可切回天津站。
+- 查询期间显示待查询状态；切换页签与备选路线时页面外壳、地图容器保持挂载。
+- 重新启动最终 Go 版本并刷新，地点清空符合当前页面会话约定；搜索、弹窗、路线查询再次验证。
+- 修正模板文本中误显示的组件调用；搜索等待期间禁用搜索按钮并显示状态。
 
-## Production verification
+最终版本截图保留于 `reference/native-go-preview.jpg`。截图中的地址均为公开地标；不是用户的住址或定位信息。
 
-Deployed owner-private to the existing Site. Verified with its already-available service access credential, retained only in session memory and sent only to this exact Site.
+## 自动检查
 
-- `/api/maps/config`: HTTP 200, provider amap, JS key present, security code absent.
-- Place search for a public Tianjin landmark: HTTP 200, high-trust provider info OK, two actual POIs returned.
-- Reverse geocoding: HTTP 200, actual address returned.
-- Driving: HTTP 200, provider info OK, one route with distance, duration and steps.
-- Transit: HTTP 200, provider info OK, three alternatives with segments.
-- Cycling: HTTP 200, provider errcode 0, route with distance, duration and steps.
-- Walking: HTTP 200, provider info ok, route with distance, duration and steps.
+以下检查通过：
 
-Corrected a production-only incompatibility: Cloudflare Workers rejects Fetch redirect mode `error`; the proxy now uses `manual` and rejects redirect responses without exposing their Location. Added regression checks and a receiver-safe fetch adapter. JSONP callbacks are restricted to valid identifiers and served with JavaScript MIME type.
+- templ 格式化与组件生成。
+- Go 全包测试及 race detector。
+- `go vet -tags nomsgpack ./...`。
+- 两目的地各五种模式并发查询，避免并发读写外层结果 map。
+- 完整页面 SSR、OOB 局部片段、地点 CRUD、删除撤销与备选路线状态同步。
+- 切换时取消旧查询，过期响应不覆盖新状态。
+- 每页工作区隔离、同一浏览器会话刷新创建新工作区、跨会话请求拒绝、CSRF、HTML 转义。
+- 自行车和电动车原始秒数分别解析，电动车兼容总时长字段 `path.duration`，缺少时兼容 `path.cost.duration`。
+- 公交步行和乘车路径分段保留；损坏/缺失路线不生成模拟路径或耗时。
+- Web 服务 Key 仅用于 Go 上游请求；配置接口不返回安全密钥或 Web 服务 Key，网络错误不输出含密钥 URL。
+- 可选网关固定 HTTPS 上游、保留 HX/Cookie、覆盖代理凭据、剥离平台访问凭据、缺少主机时返回 503。
+- 原生 Go 二进制构建成功，静态资源嵌入程序。
 
-The CUA live Site tab reached the normal ChatGPT login gate; no cloud-browser login session was available. The existing private audience was preserved. Full browser search/route interaction and loaded-map visual comparison remain unverified. Local layout, provider availability, usage dialog, server integration, production APIs and automated adapter behavior are checked. Overall status: implementation and live APIs verified; authenticated browser QA partial.
+测试中使用的 fixture/mock 只存在于 `_test.go`，不会作为运行时地图数据。没有增加依赖实现细节的快照测试。
 
+## 上线状态和限制
 
-## Bicycle/electric bicycle and alternative routes update
-
-- Kept generic origin/destination layout; added explicit bicycle and electric-bicycle columns plus a compact driving-preference row.
-- Driving defaults to 高德推荐 (v3 policy 10); policies 12/0/14/13 cover avoid traffic, speed priority, lower tolls and no highways.
-- Retain all valid provider alternatives in provider order. The chosen option changes minutes, distance, geometry and toll data as one result. Changes to origin, destination or driving policy hide obsolete option panels and invalidate results.
-- Electric-bicycle backend adapter is ready for an independent Web-service Key; no such key is configured. UI says 待接入 and issues no electric-bicycle request. No bicycle-time conversion or simulated route is used.
-- Local CUA verified five table headings, availability wording, and changing the driving-preference select to 躲避拥堵.
-- An ignored development-only fixture exercised the actual RouteOptions component. CUA selected option 2 and verified that selected state and displayed distance/time changed from 20 minutes / 8000 m to 19 minutes / 9500 m. This fixture is labeled as test data and is excluded from the production build.
-- Automated checks passed: 13 map adapter/route data cases and 15 Worker cases, including strategy 0, malformed alternatives, full-route switching, independent electric-bicycle response normalization, missing key, fixed upstream, and server-only Web key.
-- Authenticated full-page live browser QA remains limited by the existing login gate. Production multi-strategy requests are checked separately after publishing.
-
-
-## Electric-bicycle activation
-
-The independent Web-service key is now configured as a server-side Site secret. Runtime configuration reports electricBikeEnabled=true without returning the Web key or security code. The v5 electric-bicycle API returned HTTP 200, info OK and two real alternatives for the public test origin/destination.
-
-Live response paths place total travel time in path.duration, while individual steps contain cost.duration. Updated the adapter to prefer the provider's total duration and retain support for the previously documented nested path cost form. No duration is estimated or derived from the bicycle result. Regression tests cover this exact response shape, alternative switching and the enabled browser adapter path.
-
-The previous pending-key state in this document is superseded by this activation. Full authenticated live browser QA remains limited by the existing login gate; production API and actual response normalization are verified independently.
+- 既有生产 Site 继续运行此前版本，访问范围保持不变。本次源码迁移不等于生产已切换为 Go。
+- 当前 Sites 仅执行 Workers 模块，不能启动常驻 Go 进程；网关必须先配置真实 Go 主机 HTTPS 地址和共享代理凭据才能上线。
+- Dockerfile/Compose 已提供；当前执行环境没有 Docker，未运行容器构建。原生 Go 构建、服务启动、浏览器联调均已验证。
+- 本次浏览器检查使用桌面宽度；移动端沿用已有响应式 CSS，未新增移动设备专项验证。
+- 当前工作区使用进程内内存，重启会清空；数据库持久化和多副本共享不在本次范围。
