@@ -296,13 +296,19 @@ templ Results(v View) {
 }
 
 templ TimeCell(v View, p Place, mode Mode) {
+	{{ result := v.Cell(p.ID, mode.ID) }}
 	<div class="mode-time">
-		<button type="button" class={ CellClass(p.Mode == mode.ID, v.Cell(p.ID, mode.ID)) } disabled?={ !v.Cell(p.ID,mode.ID).Success() } aria-pressed={ fmt.Sprint(p.Mode == mode.ID && v.Cell(p.ID, mode.ID).Success()) } aria-label={ p.Name + "，" + mode.Name + "，" + TimeLabel(v.Cell(p.ID, mode.ID)) } title={ CellTitle(v.Cell(p.ID, mode.ID)) } hx-post="/ui/select-mode" hx-vals={ Values("id", p.ID, "mode", mode.ID) }>
+		<button type="button" class={ CellClass(p.Mode == mode.ID, result) } disabled?={ !result.Success() } aria-pressed={ fmt.Sprint(p.Mode == mode.ID && result.Success()) } aria-label={ p.Name + "，" + mode.Name + "，" + TimeLabel(result) } title={ CellTitle(result) } hx-post="/ui/select-mode" hx-vals={ Values("id", p.ID, "mode", mode.ID) }>
 			@Icon(mode.Icon, 21)
-			<span class="mode-name">{ mode.Name }</span><strong>{ TimeLabel(v.Cell(p.ID,mode.ID)) }</strong>
+			<span class="mode-name">{ mode.Name }</span>
+			if result.Success() {
+				<strong class="duration"><span class="duration-number">{ Number(result.Selected().Minutes) }</span><span class="duration-unit"> 分钟</span></strong>
+			} else {
+				<strong class="duration-status">{ TimeLabel(result) }</strong>
+			}
 		</button>
-		if v.Cell(p.ID,mode.ID).Status=="error" {
-			<span class="sr-only">{ v.Cell(p.ID,mode.ID).Reason }</span>
+		if result.Status == "error" {
+			<span class="sr-only">{ result.Reason }</span>
 		}
 	</div>
 }

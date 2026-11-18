@@ -4,6 +4,7 @@
 
 - htmx 的许可证：`web/assets/HTMX-LICENSE`。
 - Phosphor 图标的许可证：`web/assets/PHOSPHOR-LICENSE`。
+- Cal Sans 2.1.1 随包分发自 `cal-sans`，Inter 西文子集来自 `@fontsource-variable/inter` 5.3.0。许可证位于 `web/assets/fonts`。
 - Go 依赖的确切版本见 `go.mod` / `go.sum`；完整交付包的 `licenses/go-modules` 收录构建依赖模块根目录中的许可证、版权声明和 NOTICE 文件，索引见 `licenses/go-modules/index.json`。
 - 完整交付包另附 `licenses/go-toolchain-LICENSE`，为编译所用 Go 工具链的许可证。
 - 高德地图由浏览器和服务端在线访问，SDK、地图数据和 API 需遵循供应商相应条款；地图版权标识保留显示。
