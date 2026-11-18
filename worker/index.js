@@ -20,8 +20,13 @@ export async function mapApi(request, env, upstreamFetch = (input, init) => glob
   upstream.searchParams.set('key', env.AMAP_JS_KEY);
   upstream.searchParams.set('jscode', env.AMAP_JS_SECURITY_CODE);
   try {
-    const response = await upstreamFetch(upstream, {method: 'GET', redirect: 'error',
+    // Workers supports manual/follow, not the browser Fetch "error" redirect mode.
+    const response = await upstreamFetch(upstream, {method: 'GET', redirect: 'manual',
       headers: {Accept: '*/*', Referer: url.origin + '/'}, signal: AbortSignal.timeout(18000)});
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel();
+      return json({error: 'MAP_UPSTREAM_REDIRECT', info: 'SERVICE_NOT_AVAILABLE'}, 502);
+    }
     return new Response(response.body, {status: response.status, headers: {
       'Content-Type': response.headers.get('Content-Type') || 'application/json; charset=utf-8',
       'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',

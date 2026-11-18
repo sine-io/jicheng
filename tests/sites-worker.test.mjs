@@ -87,6 +87,7 @@ test('fixed-upstream proxy overwrites credentials and does not forward cookies o
   assert.equal(outgoing.url.searchParams.get('jscode'), 'test-secret');
   assert.equal(outgoing.url.searchParams.getAll('jscode').length, 1);
   assert.equal(outgoing.url.searchParams.get('callback'), 'cb');
+  assert.equal(outgoing.options.redirect, 'manual');
   assert.deepEqual(Object.keys(outgoing.options.headers).sort(), ['Accept', 'Referer']);
   assert.equal(response.status, 200); assert.match(response.headers.get('content-type'), /javascript/);
   assert.equal(await response.text(), 'cb({"status":"1"})');
@@ -105,7 +106,7 @@ test('upstream errors never echo a credential-bearing URL', async () => {
   assert.equal(response.status, 502); assert.doesNotMatch(await response.text(), /sensitive-test-code/);
 });
 
-test('preserves the runtime fetch receiver required by Workers', async () => {
+test('uses a receiver-safe runtime fetch adapter', async () => {
   const original = globalThis.fetch;
   globalThis.fetch = function () {
     assert.equal(this, globalThis);
@@ -115,4 +116,11 @@ test('preserves the runtime fetch receiver required by Workers', async () => {
     const response = await worker.fetch(new Request('https://example.test/_AMapService/v3/place/text'), {AMAP_JS_KEY: 'key', AMAP_JS_SECURITY_CODE: 'secret'});
     assert.equal(response.status, 200);
   } finally {globalThis.fetch = original;}
+});
+
+test('does not follow or expose credential-bearing upstream redirects', async () => {
+  const {mapApi} = await import('../worker/index.js');
+  const response = await mapApi(new Request('https://example.test/_AMapService/v3/place/text'), {AMAP_JS_KEY: 'key', AMAP_JS_SECURITY_CODE: 'secret'}, async () => new Response(null, {status: 302, headers: {Location: 'https://other.test/?jscode=secret'}}));
+  assert.equal(response.status, 502); assert.equal(response.headers.get('location'), null);
+  assert.doesNotMatch(await response.text(), /jscode=secret|other.test/);
 });
