@@ -3,7 +3,7 @@ const SERVICE_PATH = /^\/(?:v3|v4|v5)\/(?:place\/(?:text|detail|around)|geocode\
 function json(data, status = 200) {
   return Response.json(data, {status, headers: {'Cache-Control': 'private, no-store'}});
 }
-export async function mapApi(request, env, upstreamFetch = fetch) {
+export async function mapApi(request, env, upstreamFetch = (input, init) => globalThis.fetch(input, init)) {
   const url = new URL(request.url);
   const config = url.pathname === '/api/maps/config';
   if (!config && url.pathname !== SERVICE_PREFIX && !url.pathname.startsWith(SERVICE_PREFIX + '/')) return null;
@@ -26,9 +26,16 @@ export async function mapApi(request, env, upstreamFetch = fetch) {
       'Content-Type': response.headers.get('Content-Type') || 'application/json; charset=utf-8',
       'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
     }});
-  } catch {
+  } catch (error) {
     // Never log or echo the upstream URL: it contains the server-side jscode.
-    return json({error: 'MAP_UPSTREAM_UNAVAILABLE', info: 'SERVICE_NOT_AVAILABLE'}, 502);
+    const message = String(error?.message || '');
+    const category = /Illegal invocation|incorrect this/.test(message) ? 'RUNTIME_BINDING'
+      : /not a function/.test(message) ? 'RUNTIME_API'
+      : error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'TIMEOUT'
+      : /DNS|hostname|resolve/i.test(message) ? 'DNS'
+      : /fetch|network|connect/i.test(message) ? 'CONNECTION' : 'UPSTREAM';
+    console.error('MAP_PROXY_FAILURE', category);
+    return json({error: 'MAP_UPSTREAM_UNAVAILABLE', info: 'SERVICE_NOT_AVAILABLE', category}, 502);
   }
 }
 export default {

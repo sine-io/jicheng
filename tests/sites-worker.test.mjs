@@ -104,3 +104,15 @@ test('upstream errors never echo a credential-bearing URL', async () => {
   const response = await mapApi(new Request('https://example.test/_AMapService/v3/direction/driving'), {AMAP_JS_KEY: 'key', AMAP_JS_SECURITY_CODE: 'sensitive-test-code'}, () => {throw new Error('https://upstream.test/?jscode=sensitive-test-code');});
   assert.equal(response.status, 502); assert.doesNotMatch(await response.text(), /sensitive-test-code/);
 });
+
+test('preserves the runtime fetch receiver required by Workers', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = function () {
+    assert.equal(this, globalThis);
+    return Promise.resolve(new Response('{"status":"1"}'));
+  };
+  try {
+    const response = await worker.fetch(new Request('https://example.test/_AMapService/v3/place/text'), {AMAP_JS_KEY: 'key', AMAP_JS_SECURITY_CODE: 'secret'});
+    assert.equal(response.status, 200);
+  } finally {globalThis.fetch = original;}
+});
