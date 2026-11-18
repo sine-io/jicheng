@@ -66,3 +66,41 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../dist/server/index.js", import.meta.url));
   await access(new URL("../dist/.openai/hosting.json", import.meta.url));
 });
+
+test('browser config exposes the JS key but never the security code', async () => {
+  const response = await worker.fetch(new Request('https://example.test/api/maps/config'), {AMAP_JS_KEY: 'public-test-key', AMAP_JS_SECURITY_CODE: 'private-test-code'});
+  assert.deepEqual(await response.json(), {provider: 'amap', jsKey: 'public-test-key'});
+  assert.match(response.headers.get('cache-control'), /no-store/);
+});
+test('missing map configuration fails explicitly without falling back to HTML', async () => {
+  const response = await worker.fetch(new Request('https://example.test/api/maps/config'), {});
+  assert.equal(response.status, 503); assert.equal((await response.json()).error, 'MAP_NOT_CONFIGURED');
+});
+test('fixed-upstream proxy overwrites credentials and does not forward cookies or authorization', async () => {
+  const {mapApi} = await import('../worker/index.js');
+  let outgoing;
+  const response = await mapApi(new Request('https://example.test/_AMapService/v3/place/text?keywords=test&key=attacker&jscode=attacker&callback=cb', {headers: {Cookie: 'private-cookie', Authorization: 'Bearer private-token'}}), {AMAP_JS_KEY: 'test-key', AMAP_JS_SECURITY_CODE: 'test-secret'}, async (url, options) => {
+    outgoing = {url, options}; return new Response('cb({"status":"1"})', {headers: {'Content-Type': 'application/javascript'}});
+  });
+  assert.equal(outgoing.url.origin, 'https://restapi.amap.com');
+  assert.equal(outgoing.url.searchParams.get('key'), 'test-key');
+  assert.equal(outgoing.url.searchParams.get('jscode'), 'test-secret');
+  assert.equal(outgoing.url.searchParams.getAll('jscode').length, 1);
+  assert.equal(outgoing.url.searchParams.get('callback'), 'cb');
+  assert.deepEqual(Object.keys(outgoing.options.headers).sort(), ['Accept', 'Referer']);
+  assert.equal(response.status, 200); assert.match(response.headers.get('content-type'), /javascript/);
+  assert.equal(await response.text(), 'cb({"status":"1"})');
+});
+test('map proxy rejects arbitrary paths and write requests without making upstream requests', async () => {
+  const {mapApi} = await import('../worker/index.js'); let calls = 0;
+  const env = {AMAP_JS_KEY: 'key', AMAP_JS_SECURITY_CODE: 'secret'};
+  for (const [url, method, status] of [['https://example.test/_AMapService/https://evil.test', 'GET', 404], ['https://example.test/_AMapService/v3/place/text', 'POST', 405]]) {
+    const response = await mapApi(new Request(url, {method}), env, () => {calls++;}); assert.equal(response.status, status);
+  }
+  assert.equal(calls, 0);
+});
+test('upstream errors never echo a credential-bearing URL', async () => {
+  const {mapApi} = await import('../worker/index.js');
+  const response = await mapApi(new Request('https://example.test/_AMapService/v3/direction/driving'), {AMAP_JS_KEY: 'key', AMAP_JS_SECURITY_CODE: 'sensitive-test-code'}, () => {throw new Error('https://upstream.test/?jscode=sensitive-test-code');});
+  assert.equal(response.status, 502); assert.doesNotMatch(await response.text(), /sensitive-test-code/);
+});

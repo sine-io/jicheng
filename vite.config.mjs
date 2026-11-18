@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import os from "node:os";
+import {mapApi} from './worker/index.js';
 
 // Some hosted preview containers do not expose interface enumeration.
 // Vite only needs this to format its development-server URLs.
@@ -28,5 +29,18 @@ export default defineConfig({
       clientFiles: ["./src/main.jsx"],
     },
   },
-  plugins: [react()],
+  plugins: [react(), {
+    name: 'local-map-api',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        if (!req.url?.startsWith('/api/maps/') && !req.url?.startsWith('/_AMapService')) return next();
+        try {
+          const response = await mapApi(new Request(new URL(req.url, 'http://localhost'), {method: req.method}), process.env);
+          if (!response) return next();
+          res.writeHead(response.status, Object.fromEntries(response.headers));
+          res.end(Buffer.from(await response.arrayBuffer()));
+        } catch {res.writeHead(502, {'Content-Type': 'application/json'}); res.end('{"error":"MAP_UNAVAILABLE"}');}
+      });
+    },
+  }],
 });

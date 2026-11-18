@@ -1,57 +1,161 @@
-import {useEffect,useMemo,useRef,useState} from 'react';
-import {Path,MagnifyingGlass,PencilSimple,X,Plus,Check,CaretDown,Car,Bus,Bicycle,PersonSimpleWalk,MapPin,Crosshair,SpinnerGap,Info,ArrowRight,MapTrifold,ArrowCounterClockwise} from '@phosphor-icons/react';
+import {useEffect, useRef, useState} from 'react';
+import {Path, MagnifyingGlass, PencilSimple, X, Plus, Check, CaretDown, Car, Bus, Bicycle, PersonSimpleWalk, MapPin, Crosshair, SpinnerGap, Info, ArrowRight, MapTrifold} from '@phosphor-icons/react';
 import MapView from './MapView';
-import {MODES,PROVIDERS,CATALOG,INITIAL_ORIGINS,INITIAL_DESTINATIONS,copyPlaces,computeResults,colorFor,letter} from './model';
-const MODE_ICONS={driving:Car,transit:Bus,cycling:Bicycle,walking:PersonSimpleWalk};
-function IconButton({label,children,onClick,className='',disabled=false}){return <button type="button" className={'icon-button '+className} title={label} aria-label={label} onClick={onClick} disabled={disabled}>{children}</button>;}
-function Dialog({title,children,onClose,className=''}){
- const dialog=useRef(null);
- useEffect(()=>{const previous=document.activeElement,node=dialog.current;if(!node.open)node.showModal();return()=>{node.close();if(previous?.isConnected)previous.focus();};},[]);
- return <dialog ref={dialog} className={'app-dialog '+className} onCancel={e=>{e.preventDefault();onClose();}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}><div className="dialog-heading"><h2>{title}</h2><IconButton label="关闭窗口" onClick={onClose}><X size={21}/></IconButton></div>{children}</dialog>;
+import {MODES, PROVIDERS, colorFor, letter, distanceLabel} from './model';
+import {loadAMap, searchPlaces, reversePlace, queryRoute} from './amap';
+const MODE_ICONS = {driving: Car, transit: Bus, cycling: Bicycle, walking: PersonSimpleWalk};
+function IconButton({label, children, onClick, className = '', disabled = false}) {
+  return <button type="button" className={'icon-button ' + className} title={label} aria-label={label} onClick={onClick} disabled={disabled}>{children}</button>;
 }
-function PlaceEditor({editor,onSave,onClose,onPick}){
- const [name,setName]=useState(editor.name),[point,setPoint]=useState(editor.point),[selectedLabel,setSelectedLabel]=useState(editor.pointLabel||(editor.id?'原有位置':'')),[error,setError]=useState(''),[filter,setFilter]=useState('');
- const kindName=editor.kind==='origin'?'出发地':'目的地',choices=CATALOG.filter(item=>item.name.includes(filter.trim()));
- function submit(e){e.preventDefault();if(!name.trim()){setError('请填写地点名称');return;}if(!point){setError('请选择一个示例地点，或在地图上选点');return;}onSave({...editor,name:name.trim(),point,pointLabel:selectedLabel});}
- return <Dialog title={(editor.id?'编辑':'添加')+kindName} onClose={onClose}><form onSubmit={submit}>
-  <label className="form-label" htmlFor="place-name">地点名称</label><input id="place-name" className="form-input" autoFocus value={name} maxLength={32} placeholder={'为这个'+kindName+'起个名字'} onChange={e=>{setName(e.target.value);setError('');}}/>
-  <div className="location-section-title"><label className="form-label" htmlFor="place-search">设置地点位置</label><span className="small-demo-tag">示例地点</span></div><div className="dialog-search"><MagnifyingGlass size={19}/><input id="place-search" placeholder="搜索示例地点" value={filter} onChange={e=>setFilter(e.target.value)}/></div>
-  <div className="place-choices" aria-label="可选示例地点">{choices.map(choice=>{const selected=point&&Math.hypot(point[0]-choice.point[0],point[1]-choice.point[1])<1;return <button type="button" className={'place-choice'+(selected?' selected':'')} key={choice.id} onClick={()=>{setPoint([...choice.point]);setSelectedLabel(choice.name);setError('');}}><MapPin size={19}/><span>{choice.name}</span>{selected&&<Check size={18} weight="bold"/>}</button>;})}{!choices.length&&<p className="search-empty">没有匹配的示例地点，可使用地图选点。</p>}</div>
-  <button type="button" className="map-pick-action" onClick={()=>onPick({...editor,name,point,pointLabel:selectedLabel})}><Crosshair size={19}/>在地图上选点<ArrowRight size={17}/></button>
-  {point&&<div className="chosen-position"><Check size={15}/>已选择：{selectedLabel||'地图上的位置'}</div>}<p className="editor-demo-note">当前为演示地图。真实地址搜索将在接入地图服务后启用。</p>{error&&<p className="form-error" role="alert">{error}</p>}
-  <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose}>取消</button><button type="submit" className="primary-button">{editor.id?'保存修改':'添加'+kindName}</button></div>
- </form></Dialog>;
+function Dialog({title, children, onClose, className = ''}) {
+  const dialog = useRef(null);
+  useEffect(() => {
+    const previous = document.activeElement, node = dialog.current;
+    if (!node.open) node.showModal();
+    return () => {node.close(); if (previous?.isConnected) previous.focus();};
+  }, []);
+  return <dialog ref={dialog} className={'app-dialog ' + className} onCancel={e => {e.preventDefault(); onClose();}} onClick={e => {if (e.target === e.currentTarget) onClose();}}><div className="dialog-heading"><h2>{title}</h2><IconButton label="关闭窗口" onClick={onClose}><X size={21}/></IconButton></div>{children}</dialog>;
 }
-export function App(){
- const [origins,setOrigins]=useState(()=>copyPlaces(INITIAL_ORIGINS)),[destinations,setDestinations]=useState(()=>copyPlaces(INITIAL_DESTINATIONS)),[activeId,setActiveId]=useState('o1'),[providerId,setProviderId]=useState('baidu'),[providerOpen,setProviderOpen]=useState(false),[demoInfoOpen,setDemoInfoOpen]=useState(false),[query,setQuery]=useState('出发地 1'),[searchOpen,setSearchOpen]=useState(false),[searchIndex,setSearchIndex]=useState(-1),[editor,setEditor]=useState(null),[picking,setPicking]=useState(null),[focusId,setFocusId]=useState(null),[results,setResults]=useState(null),[loading,setLoading]=useState(true),[revision,setRevision]=useState(0),[fitRevision,setFitRevision]=useState(0),[toast,setToast]=useState(null);
- const toastTimer=useRef(null),serial=useRef(4),providerControl=useRef(null),searchControl=useRef(null);
- const active=origins.find(p=>p.id===activeId)||null,provider=PROVIDERS.find(p=>p.id===providerId);
- const options=useMemo(()=>{const seen=new Set();return [...origins,...destinations,...CATALOG].filter(p=>{if(seen.has(p.name))return false;seen.add(p.name);return !query.trim()||query===active?.name||p.name.includes(query.trim());}).slice(0,7);},[origins,destinations,query,active?.name]);
- const requestKey=JSON.stringify({active,destinations:destinations.map(d=>({id:d.id,point:d.point})),providerId,revision});
- useEffect(()=>{setResults(null);if(!active||!destinations.length){setLoading(false);return;}setLoading(true);const timer=window.setTimeout(()=>{setResults(computeResults(active,destinations,provider));setLoading(false);},420);return()=>window.clearTimeout(timer);},[requestKey]);
- useEffect(()=>()=>clearTimeout(toastTimer.current),[]);
- useEffect(()=>{function dismiss(e){if(!providerControl.current?.contains(e.target))setProviderOpen(false);if(!searchControl.current?.contains(e.target))setSearchOpen(false);}function key(e){if(e.key==='Escape'){setProviderOpen(false);setSearchOpen(false);if(picking)setPicking(null);}}document.addEventListener('pointerdown',dismiss);document.addEventListener('keydown',key);return()=>{document.removeEventListener('pointerdown',dismiss);document.removeEventListener('keydown',key);};},[picking]);
- function notify(message,undo){clearTimeout(toastTimer.current);setToast({message,undo});toastTimer.current=setTimeout(()=>setToast(null),undo?7000:4000);}
- function invalidate(){setResults(null);setLoading(true);setFocusId(null);}
- function switchOrigin(id){if(id===activeId)return;invalidate();setActiveId(id);setQuery(origins.find(p=>p.id===id)?.name||'');setSearchOpen(false);setPicking(null);}
- function openEditor(kind,place){setSearchOpen(false);setPicking(null);setEditor({kind,id:place?.id,name:place?.name||(kind==='origin'?'出发地 '+(origins.length+1):'目的地 '+letter(destinations.length)),point:place?.point?[...place.point]:null,color:place?.color,mode:place?.mode});}
- function saveEditor(next){invalidate();if(next.kind==='origin'){const id=next.id||'o-new-'+serial.current++,place={id,name:next.name,point:[...next.point]};setOrigins(before=>next.id?before.map(p=>p.id===id?place:p):[...before,place]);setActiveId(id);setQuery(place.name);}else{const id=next.id||'d-new-'+serial.current++,place={id,name:next.name,point:[...next.point],color:next.color??serial.current++,mode:next.mode||'driving'};setDestinations(before=>next.id?before.map(p=>p.id===id?place:p):[...before,place]);}setEditor(null);setPicking(null);setFitRevision(n=>n+1);notify(next.id?'地点已更新，路线已重新查询':'地点已添加');}
- function deleteOrigin(place){const index=origins.findIndex(p=>p.id===place.id),next=origins.filter(p=>p.id!==place.id);invalidate();setOrigins(next);if(activeId===place.id){setActiveId(next[0]?.id||null);setQuery(next[0]?.name||'');}notify('已删除 '+place.name,()=>{invalidate();setOrigins(before=>{const restored=[...before];restored.splice(Math.min(index,restored.length),0,place);return restored;});setActiveId(place.id);setQuery(place.name);});}
- function deleteDestination(place){const index=destinations.findIndex(p=>p.id===place.id);invalidate();setDestinations(before=>before.filter(p=>p.id!==place.id));notify('已删除 '+place.name,()=>{invalidate();setDestinations(before=>{const restored=[...before];restored.splice(Math.min(index,restored.length),0,place);return restored;});});}
- function chooseSearch(place){if(!active){openEditor('origin');return;}invalidate();setOrigins(before=>before.map(p=>p.id===activeId?{...p,name:place.name,point:[...place.point]}:p));setQuery(place.name);setSearchOpen(false);setSearchIndex(-1);setPicking(null);}
- function submitQuery(e){e?.preventDefault();if(!active)return;if(query.trim()&&query.trim()!==active.name){const exact=options.find(p=>p.name===query.trim());if(exact){chooseSearch(exact);return;}if(options.length===1){chooseSearch(options[0]);return;}setSearchOpen(true);notify('请选择搜索结果，或使用地图选点');return;}invalidate();setSearchOpen(false);setPicking(null);setRevision(n=>n+1);}
- function pickPoint(point){if(!picking)return;if(picking.quick&&active){invalidate();setOrigins(before=>before.map(p=>p.id===activeId?{...p,point}:p));setPicking(null);setQuery(active.name);notify('出发位置已更新');}else{setEditor({...picking.editor,point,pointLabel:'地图选点'});setPicking(null);}}
- function selectMode(d,mode){const route=results?.[d.id]?.[mode.id];if(!route?.supported||loading)return;setDestinations(before=>before.map(p=>p.id===d.id?{...p,mode:mode.id}:p));setFocusId(d.id);}
- function resetDemo(){invalidate();setOrigins(copyPlaces(INITIAL_ORIGINS));setDestinations(copyPlaces(INITIAL_DESTINATIONS));setActiveId('o1');setQuery('出发地 1');setProviderId('baidu');setPicking(null);setDemoInfoOpen(false);setFitRevision(n=>n+1);notify('已恢复初始示例');}
- return <main className="route-app">
-  <header className="app-header"><div className="brand"><Path size={46} weight="bold" aria-hidden="true"/><h1>路线查询</h1></div><p className="brand-subtitle">切换出发地，查看多目的地路线</p><div className="header-actions"><div className="provider-control" ref={providerControl}><button className="provider-trigger" aria-expanded={providerOpen} aria-haspopup="menu" onClick={()=>setProviderOpen(!providerOpen)}><span>地图服务：</span><strong>{provider.name}</strong><CaretDown size={16}/></button>{providerOpen&&<div className="provider-menu" role="menu" aria-label="地图服务"><p className="menu-caption">地图来源预览</p>{PROVIDERS.map(item=><button role="menuitemradio" aria-checked={providerId===item.id} key={item.id} onClick={()=>{if(providerId!==item.id)invalidate();setProviderId(item.id);setProviderOpen(false);notify('已切换至'+item.name+'演示视图，当前仍为示例数据');}}><MapTrifold size={20}/><span><strong>{item.name}</strong><small>{item.description}</small></span>{providerId===item.id&&<Check size={18} weight="bold"/>}</button>)}<div className="provider-note"><Info size={16}/><span>当前为交互演示，真实地图服务尚未配置。</span></div></div>}</div><button className="demo-badge" onClick={()=>setDemoInfoOpen(true)}>演示数据<Info size={14}/></button></div></header>
-  <section className="origin-toolbar" aria-label="出发地管理"><span className="toolbar-label">出发地</span><div className="origin-tabs" role="tablist" aria-label="选择出发地">{origins.map(origin=>{const selected=activeId===origin.id;return <div className={'origin-tab-wrap'+(selected?' active':'')} key={origin.id}><button role="tab" aria-selected={selected} id={'tab-'+origin.id} className="origin-tab" onClick={()=>switchOrigin(origin.id)} title={origin.name}>{origin.name}</button>{selected&&<div className="origin-tab-actions"><IconButton label={'编辑'+origin.name} onClick={()=>openEditor('origin',origin)}><PencilSimple size={18}/></IconButton><IconButton label={'删除'+origin.name} onClick={()=>deleteOrigin(origin)}><X size={18}/></IconButton></div>}</div>;})}{!origins.length&&<span className="no-origin-label">还没有出发地</span>}</div><button className="text-button add-origin" onClick={()=>openEditor('origin')}><Plus size={21}/>添加出发地</button></section>
-  <form className="search-toolbar" onSubmit={submitQuery}><div className="search-combobox" ref={searchControl}><MagnifyingGlass size={25} aria-hidden="true"/><input aria-label="搜索出发地" role="combobox" aria-expanded={searchOpen} aria-controls="origin-search-options" aria-autocomplete="list" aria-activedescendant={searchIndex>=0?'search-option-'+searchIndex:undefined} placeholder={active?'搜索地点名称':'请先添加出发地'} disabled={!active} value={query} onFocus={()=>{setSearchOpen(true);setSearchIndex(-1);}} onChange={e=>{setQuery(e.target.value);setSearchOpen(true);setSearchIndex(-1);}} onKeyDown={e=>{if(e.key==='ArrowDown'){e.preventDefault();setSearchOpen(true);setSearchIndex(Math.min(searchIndex+1,options.length-1));}if(e.key==='ArrowUp'){e.preventDefault();setSearchIndex(Math.max(0,searchIndex-1));}if(e.key==='Escape')setSearchOpen(false);if(e.key==='Enter'&&searchOpen&&searchIndex>=0&&options[searchIndex]){e.preventDefault();chooseSearch(options[searchIndex]);}}}/>{query&&<IconButton label="清空搜索" onClick={()=>{setQuery('');setSearchOpen(true);}}><X size={15} weight="bold"/></IconButton>}{searchOpen&&active&&<div className="search-options" role="listbox" id="origin-search-options"><div className="search-options-caption">演示地点</div>{options.map((place,index)=><button type="button" id={'search-option-'+index} role="option" aria-selected={searchIndex===index} className={searchIndex===index?'highlighted':''} key={place.id+place.name} onMouseDown={e=>e.preventDefault()} onClick={()=>chooseSearch(place)}><MapPin size={18}/><span>{place.name}</span><span className="option-tag">示例</span></button>)}{!options.length&&<p className="search-empty">未找到示例地点，可使用地图选点。真实地点搜索需要接入地图服务。</p>}</div>}</div><div className="search-help"><span>搜索地点，或</span><button type="button" disabled={!active} onClick={()=>{setPicking({kind:'origin',quick:true});setSearchOpen(false);}}>在地图上选点</button></div><button className="primary-button query-button" type="submit" disabled={!active||!destinations.length||loading}>{loading&&active&&destinations.length>0&&<SpinnerGap className="spin" size={20}/>} {loading&&active&&destinations.length>0?'查询中':'查询路线'}</button></form>
-  <MapView origin={active} destinations={destinations} results={results} loading={loading} focusId={focusId} onFocus={setFocusId} onMapPick={pickPoint} picking={picking} cancelPicking={()=>setPicking(null)} fitRevision={fitRevision}/>
-  <section className="results-section" aria-label="目的地路线查询结果" aria-busy={loading&&!!active&&destinations.length>0}><div className="results-heading"><h2>目的地与耗时</h2><p>点击时长，在地图中查看对应路线</p><button className="text-button add-destination" onClick={()=>openEditor('destination')}><Plus size={21}/>添加目的地</button></div><div className="results-table-scroll"><table className="results-table"><thead><tr><th scope="col" className="destination-column">目的地</th>{MODES.map(mode=>{const Icon=MODE_ICONS[mode.id];return <th scope="col" key={mode.id}><span className="mode-heading"><Icon size={25}/>{mode.name}</span></th>;})}<th scope="col" className="actions-column"><span className="sr-only">地点操作</span></th></tr></thead><tbody>{destinations.map((d,index)=>{const color=colorFor(d);return <tr key={d.id} className={focusId===d.id?'focused-row':''}><th scope="row"><button className="destination-name" onClick={()=>setFocusId(d.id)} title={d.name}><span className="destination-letter" style={{background:color}}>{letter(index)}</span><span>{d.name}</span></button></th>{MODES.map(mode=>{const route=results?.[d.id]?.[mode.id],supported=!(provider.id==='open'&&mode.id==='transit'),selected=d.mode===mode.id,pending=loading&&active;return <td key={mode.id}><button type="button" className={'time-cell'+(selected?' selected':'')+(pending?' pending':'')} style={{'--route-color':color,'--route-tint':color+'20'}} aria-pressed={selected} aria-label={d.name+'，'+mode.name+(route?.supported?'，'+route.minutes+'分钟':supported?'':'，暂不支持')} disabled={pending||!active||!supported||!route?.supported} title={supported?(!active?'请先添加出发地':route?.supported?'点击查看'+mode.name+'路线（演示数据）':'等待查询'):'开源方案尚未接入公交数据'} onClick={()=>selectMode(d,mode)}>{!supported?<span className="unsupported-time">暂不支持</span>:pending?<span className="loading-dots" aria-label="查询中">···</span>:!active||!route?<span className="missing-time">—</span>:<>{selected&&<Check size={21} weight="bold"/>}<span>{route.minutes}<span className="minutes-unit"> 分钟</span></span></>}</button></td>;})}<td className="row-actions"><IconButton label={'编辑'+d.name} onClick={()=>openEditor('destination',d)}><PencilSimple size={21}/></IconButton><IconButton label={'删除'+d.name} onClick={()=>deleteDestination(d)}><X size={21}/></IconButton></td></tr>;})}</tbody></table></div>{!destinations.length&&<div className="destinations-empty"><MapPin size={29}/><h3>添加一个目的地</h3><p>添加后，即可查看从当前出发地到这里的路线和耗时。</p><button className="primary-button" onClick={()=>openEditor('destination')}><Plus size={18}/>添加目的地</button></div>}<div className="sr-only" role="status" aria-live="polite">{loading?'正在查询路线':active?active.name+'的路线查询完成，共'+destinations.length+'个目的地':'请添加出发地'}</div></section>
-  <footer className="app-footer"><span>原型演示 · 地点、路线与时长均为示例</span><button onClick={()=>setDemoInfoOpen(true)}><Info size={15}/><span>演示说明</span></button></footer>
-  {editor&&<PlaceEditor key={editor.id||'new-'+editor.kind} editor={editor} onClose={()=>setEditor(null)} onSave={saveEditor} onPick={draft=>{setEditor(null);setPicking({kind:draft.kind,editor:draft});}}/>}
-  {demoInfoOpen&&<Dialog title="关于这个原型" onClose={()=>setDemoInfoOpen(false)} className="demo-info-dialog"><div className="demo-info-icon"><MapTrifold size={30}/></div><h3>先体验完整的路线查询流程</h3><p>你可以添加和编辑地点、切换出发地、地图选点，以及点击不同交通方式查看示例路线。</p><p>当前的地图、地点和耗时均为虚构演示数据，不能用于真实出行决策。切换地图来源只预览交互，尚未调用高德、百度或开源的真实算路服务。</p><p className="demo-info-small">接入真实地点搜索和路线查询，需要配置地图服务的 API。这里的修改仅保留在当前页面，刷新可恢复初始示例。</p><div className="dialog-actions"><button type="button" className="secondary-button" onClick={resetDemo}><ArrowCounterClockwise size={18}/>恢复初始示例</button><button type="button" className="primary-button" onClick={()=>setDemoInfoOpen(false)}>开始体验</button></div></Dialog>}
-  {toast&&<div className="toast" role="status"><Check size={18}/><span>{toast.message}</span>{toast.undo&&<button onClick={()=>{toast.undo();setToast(null);clearTimeout(toastTimer.current);}}>撤销</button>}<IconButton label="关闭提示" onClick={()=>{setToast(null);clearTimeout(toastTimer.current);}}><X size={16}/></IconButton></div>}
- </main>;
+function PlaceEditor({sdk, editor, onSave, onClose, onPick, city}) {
+  const [name, setName] = useState(editor.name || ''), [selected, setSelected] = useState(editor.selected || null);
+  const [filter, setFilter] = useState(''), [choices, setChoices] = useState([]), [searched, setSearched] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const request = useRef(null), epoch = useRef(0);
+  useEffect(() => () => {epoch.current++; request.current?.abort();}, []);
+  const kindName = editor.kind === 'origin' ? '出发地' : '目的地';
+  async function search() {
+    if (!filter.trim() || !sdk) return;
+    request.current?.abort(); const controller = new AbortController(); request.current = controller;
+    const version = ++epoch.current;
+    setBusy(true); setChoices([]); setError(''); setSearched(false);
+    try {
+      const places = await searchPlaces(sdk, filter, city, controller.signal);
+      if (version !== epoch.current) return;
+      setChoices(places); setSearched(true);
+    } catch (e) {if (version === epoch.current && e.name !== 'AbortError') setError(e.message);}
+    finally {if (version === epoch.current) setBusy(false);}
+  }
+  function submit(e) {
+    e.preventDefault();
+    if (!selected) {setError('请从搜索结果中选择地点，或在地图上选点'); return;}
+    onSave({...editor, name: name.trim() || selected.name, selected});
+  }
+  return <Dialog title={(editor.id ? '编辑' : '添加') + kindName} onClose={onClose}><form onSubmit={submit}>
+    <label className="form-label" htmlFor="place-search">搜索真实地点</label>
+    <div className="dialog-search live-search"><MagnifyingGlass size={19}/><input id="place-search" autoFocus placeholder="输入地点，建议加上城市名" value={filter} maxLength={100} onChange={e => {epoch.current++; request.current?.abort(); setFilter(e.target.value); setChoices([]); setSearched(false); setBusy(false); setError('');}} onKeyDown={e => {if (e.key === 'Enter') {e.preventDefault(); search();}}}/><button type="button" disabled={!sdk || !filter.trim() || busy} onClick={search}>{busy ? <SpinnerGap className="spin" size={19}/> : '搜索'}</button></div>
+    <div className="place-choices" aria-label="高德地点搜索结果" aria-live="polite">
+      {choices.map((choice, i) => <button type="button" className={'place-choice' + (selected?.poiId === choice.poiId && selected?.address === choice.address ? ' selected' : '')} key={choice.poiId || i} onClick={() => {setSelected(choice); setError('');}}><MapPin size={19}/><span className="place-result-copy"><strong>{choice.name}</strong><small>{choice.address}</small></span>{selected?.poiId === choice.poiId && selected?.address === choice.address && <Check size={18}/>}</button>)}
+      {!choices.length && <p className="search-empty">{busy ? '正在搜索高德地点…' : searched ? '没有找到地点，换个名称或加上城市再试。' : '搜索后选择准确地址，也可以在地图上选点。'}</p>}
+    </div>
+    <button type="button" className="map-pick-action" onClick={() => onPick({...editor, name, selected})}><Crosshair size={19}/>在地图上选点<ArrowRight size={17}/></button>
+    {selected && <div className="chosen-position live-chosen"><Check size={16}/><span>已选择：{selected.name}<small>{selected.address}</small></span></div>}
+    <label className="form-label" htmlFor="place-name">显示名称 <span className="optional-label">可选</span></label><input id="place-name" className="form-input" value={name} maxLength={32} placeholder="留空使用地点名称" onChange={e => setName(e.target.value)}/>
+    {error && <p className="form-error" role="alert">{error}</p>}
+    <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose}>取消</button><button type="submit" className="primary-button">{editor.id ? '保存修改' : '添加' + kindName}</button></div>
+  </form></Dialog>;
+}
+export function App() {
+  const [sdk, setSdk] = useState(null), [sdkError, setSdkError] = useState(''), [mapReady, setMapReady] = useState(false);
+  const [origins, setOrigins] = useState([]), [destinations, setDestinations] = useState([]), [activeId, setActiveId] = useState(null);
+  const [providerOpen, setProviderOpen] = useState(false), [infoOpen, setInfoOpen] = useState(false);
+  const [query, setQuery] = useState(''), [searchOpen, setSearchOpen] = useState(false), [searchIndex, setSearchIndex] = useState(-1), [searchOptions, setSearchOptions] = useState([]), [searchBusy, setSearchBusy] = useState(false), [searchError, setSearchError] = useState('');
+  const [editor, setEditor] = useState(null), [picking, setPicking] = useState(null), [pickBusy, setPickBusy] = useState(false), [focusId, setFocusId] = useState(null);
+  const [batch, setBatch] = useState(null), [revision, setRevision] = useState(0), [fitRevision, setFitRevision] = useState(0), [toast, setToast] = useState(null);
+  const serial = useRef(1), colorSerial = useRef(0), toastTimer = useRef(null), searchEpoch = useRef(0), searchRequest = useRef(null), pickEpoch = useRef(0), pickRequest = useRef(null), providerControl = useRef(null), searchControl = useRef(null);
+  const active = origins.find(p => p.id === activeId) || null;
+  const requestKey = JSON.stringify({origin: active && [active.id, active.point, active.city], destinations: destinations.map(d => [d.id, d.point, d.city]), revision});
+  const results = batch?.key === requestKey ? batch.results : null;
+  const loading = !!sdk && !!active && !!destinations.length && (batch?.key !== requestKey || batch.loading);
+  const searchIntent = !!query.trim() && query.trim() !== active?.name;
+  useEffect(() => {let live = true; loadAMap().then(value => {if (live) setSdk(value);}).catch(e => {if (live) setSdkError(e.message);}); return () => {live = false;};}, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    if (!sdk || !active || !destinations.length) {setBatch(null); return () => controller.abort();}
+    const initial = Object.fromEntries(destinations.map(d => [d.id, Object.fromEntries(MODES.map(m => [m.id, {status: 'pending'}]))]));
+    setBatch({key: requestKey, results: initial, loading: true});
+    let remaining = destinations.length * MODES.length;
+    for (const destination of destinations) for (const mode of MODES) {
+      queryRoute(sdk, active, destination, mode.id, controller.signal).catch(e => e.name === 'AbortError' ? null : {status: 'error', reason: '路线查询失败，请重试'}).then(route => {
+        if (controller.signal.aborted || !route) return;
+        remaining--;
+        setBatch(previous => previous?.key !== requestKey ? previous : {...previous, results: {...previous.results, [destination.id]: {...previous.results[destination.id], [mode.id]: route}}, loading: remaining > 0, queriedAt: Date.now()});
+      });
+    }
+    return () => controller.abort();
+  }, [sdk, requestKey]);
+  useEffect(() => () => {clearTimeout(toastTimer.current); searchRequest.current?.abort(); pickRequest.current?.abort();}, []);
+  useEffect(() => {
+    function dismiss(e) {if (!providerControl.current?.contains(e.target)) setProviderOpen(false); if (!searchControl.current?.contains(e.target) && !e.target.closest('.query-button')) setSearchOpen(false);}
+    function key(e) {if (e.key === 'Escape') {setProviderOpen(false); setSearchOpen(false); cancelPick();}}
+    document.addEventListener('pointerdown', dismiss); document.addEventListener('keydown', key);
+    return () => {document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', key);};
+  }, []);
+  function notify(message, undo) {clearTimeout(toastTimer.current); setToast({message, undo}); toastTimer.current = setTimeout(() => setToast(null), undo ? 7000 : 4500);}
+  function cancelSearch() {searchEpoch.current++; searchRequest.current?.abort(); setSearchBusy(false); setSearchOpen(false); setSearchOptions([]); setSearchError(''); setSearchIndex(-1);}
+  function cancelPick() {pickEpoch.current++; pickRequest.current?.abort(); setPicking(null); setPickBusy(false);}
+  function switchOrigin(id) {if (id === activeId) return; cancelSearch(); cancelPick(); setActiveId(id); setQuery(origins.find(p => p.id === id)?.name || ''); setFocusId(null); setFitRevision(n => n + 1);}
+  function openEditor(kind, place) {cancelSearch(); cancelPick(); setEditor({kind, id: place?.id, name: place?.name || '', selected: place || null, color: place?.color, mode: place?.mode});}
+  function saveEditor(next) {
+    const place = {...next.selected, id: next.id || 'place-' + serial.current++, name: next.name};
+    if (next.kind === 'origin') {setOrigins(before => next.id ? before.map(p => p.id === place.id ? place : p) : [...before, place]); setActiveId(place.id); setQuery(place.name);}
+    else {place.color = next.color ?? colorSerial.current++; place.mode = next.mode || 'driving'; setDestinations(before => next.id ? before.map(p => p.id === place.id ? place : p) : [...before, place]);}
+    setEditor(null); cancelPick(); setFocusId(null); setFitRevision(n => n + 1); notify(next.id ? '地点已更新' : '地点已添加');
+  }
+  function deleteOrigin(place) {
+    const index = origins.findIndex(p => p.id === place.id), next = origins.filter(p => p.id !== place.id);
+    cancelSearch(); cancelPick(); setOrigins(next); setFocusId(null);
+    if (activeId === place.id) {setActiveId(next[0]?.id || null); setQuery(next[0]?.name || '');}
+    notify('已删除 ' + place.name, () => {setOrigins(before => {const restored = [...before]; restored.splice(Math.min(index, restored.length), 0, place); return restored;}); setActiveId(place.id); setQuery(place.name);});
+  }
+  function deleteDestination(place) {
+    const index = destinations.findIndex(p => p.id === place.id);
+    setDestinations(before => before.filter(p => p.id !== place.id)); setFocusId(null);
+    notify('已删除 ' + place.name, () => setDestinations(before => {const restored = [...before]; restored.splice(Math.min(index, restored.length), 0, place); return restored;}));
+  }
+  function chooseSearch(place) {
+    const id = activeId || 'place-' + serial.current++, next = {...place, id};
+    setOrigins(before => activeId ? before.map(p => p.id === activeId ? next : p) : [...before, next]); setActiveId(id); setQuery(place.name); cancelSearch(); cancelPick(); setFocusId(null); setFitRevision(n => n + 1);
+  }
+  async function submitQuery(e) {
+    e?.preventDefault(); if (!sdk) return;
+    if (!searchIntent) {if (active && destinations.length) {cancelSearch(); cancelPick(); setRevision(n => n + 1);} return;}
+    searchRequest.current?.abort(); const controller = new AbortController(); searchRequest.current = controller; const version = ++searchEpoch.current;
+    setSearchOpen(true); setSearchBusy(true); setSearchOptions([]); setSearchError(''); setSearchIndex(-1);
+    try {const places = await searchPlaces(sdk, query, active?.city, controller.signal); if (version === searchEpoch.current) setSearchOptions(places);}
+    catch (error) {if (version === searchEpoch.current && error.name !== 'AbortError') setSearchError(error.message);}
+    finally {if (version === searchEpoch.current) setSearchBusy(false);}
+  }
+  async function pickPoint(point) {
+    if (!picking || pickBusy || !sdk) return;
+    const version = ++pickEpoch.current, draft = picking; pickRequest.current?.abort(); const controller = new AbortController(); pickRequest.current = controller; setPickBusy(true);
+    try {
+      const place = await reversePlace(sdk, point, controller.signal);
+      if (version !== pickEpoch.current) return;
+      setPicking(null); setPickBusy(false);
+      if (draft.quick) chooseSearch(place); else setEditor({...draft.editor, selected: place});
+    } catch (error) {if (version === pickEpoch.current) {setPickBusy(false); if (error.name !== 'AbortError') notify(error.message);}}
+  }
+  function selectMode(destination, mode) {
+    if (results?.[destination.id]?.[mode.id]?.status !== 'success') return;
+    setDestinations(before => before.map(p => p.id === destination.id ? {...p, mode: mode.id} : p)); setFocusId(destination.id);
+  }
+  const statusText = sdkError ? '连接失败' : mapReady ? '已接入' : '连接中';
+  const routeErrors = Object.values(results || {}).flatMap(row => Object.values(row)).filter(route => route.status === 'error');
+  return <main className="route-app">
+    <header className="app-header"><div className="brand"><Path size={46} weight="bold" aria-hidden="true"/><h1>路线查询</h1></div><p className="brand-subtitle">切换出发地，查看多目的地路线</p><div className="header-actions"><div className="provider-control" ref={providerControl}><button className="provider-trigger" aria-expanded={providerOpen} aria-haspopup="menu" onClick={() => setProviderOpen(!providerOpen)}><span>地图服务：</span><strong>高德</strong><CaretDown size={16}/></button>{providerOpen && <div className="provider-menu" role="menu" aria-label="地图服务"><p className="menu-caption">地图来源</p>{PROVIDERS.map(item => <button role="menuitemradio" aria-checked={item.id === 'amap'} disabled={!item.configured} key={item.id} onClick={() => setProviderOpen(false)}><MapTrifold size={20}/><span><strong>{item.name}</strong><small>{item.description}</small></span>{item.id === 'amap' && <Check size={18} weight="bold"/>}</button>)}</div>}</div><button className={'demo-badge live-status ' + (sdkError ? 'failed' : '')} onClick={() => setInfoOpen(true)}><span className={'status-dot' + (mapReady ? ' ready' : '')}/>{statusText}<Info size={14}/></button></div></header>
+    <section className="origin-toolbar" aria-label="出发地管理"><span className="toolbar-label">出发地</span><div className="origin-tabs" role="tablist" aria-label="选择出发地">{origins.map(origin => <div className={'origin-tab-wrap' + (activeId === origin.id ? ' active' : '')} key={origin.id}><button role="tab" aria-selected={activeId === origin.id} className="origin-tab" onClick={() => switchOrigin(origin.id)} title={origin.address}>{origin.name}</button>{activeId === origin.id && <div className="origin-tab-actions"><IconButton label={'编辑' + origin.name} onClick={() => openEditor('origin', origin)}><PencilSimple size={18}/></IconButton><IconButton label={'删除' + origin.name} onClick={() => deleteOrigin(origin)}><X size={18}/></IconButton></div>}</div>)}{!origins.length && <span className="no-origin-label">搜索地点，或添加一个出发地</span>}</div><button className="text-button add-origin" disabled={!sdk} onClick={() => openEditor('origin')}><Plus size={21}/>添加出发地</button></section>
+    <form className="search-toolbar" onSubmit={submitQuery}><div className="search-combobox" ref={searchControl}><MagnifyingGlass size={25} aria-hidden="true"/><input aria-label="搜索出发地" role="combobox" aria-expanded={searchOpen} aria-controls="origin-search-options" aria-autocomplete="list" aria-activedescendant={searchIndex >= 0 ? 'search-option-' + searchIndex : undefined} placeholder="搜索出发地，建议加上城市名" disabled={!sdk} value={query} maxLength={100} onChange={e => {cancelSearch(); setQuery(e.target.value);}} onKeyDown={e => {if (e.key === 'ArrowDown' && searchOptions.length) {e.preventDefault(); setSearchOpen(true); setSearchIndex(Math.min(searchIndex + 1, searchOptions.length - 1));} if (e.key === 'ArrowUp' && searchOptions.length) {e.preventDefault(); setSearchIndex(Math.max(0, searchIndex - 1));} if (e.key === 'Enter' && searchOpen && searchIndex >= 0 && searchOptions[searchIndex]) {e.preventDefault(); chooseSearch(searchOptions[searchIndex]);}}}/>{query && <IconButton label="清空搜索" onClick={() => {cancelSearch(); setQuery('');}}><X size={15} weight="bold"/></IconButton>}{searchOpen && <div className="search-options" role="listbox" id="origin-search-options" aria-busy={searchBusy}><div className="search-options-caption">选择准确的出发位置</div>{searchOptions.map((place, index) => <button type="button" id={'search-option-' + index} role="option" aria-selected={searchIndex === index} className={searchIndex === index ? 'highlighted' : ''} key={place.poiId || index} onMouseDown={e => e.preventDefault()} onClick={() => chooseSearch(place)}><MapPin size={18}/><span className="place-result-copy"><strong>{place.name}</strong><small>{place.address}</small></span></button>)}{!searchOptions.length && <p className="search-empty" role="status">{searchBusy ? '正在搜索高德地点…' : searchError || '没有找到地点，换个名称或加上城市再试。'}</p>}</div>}</div><div className="search-help"><span>搜索地点，或</span><button type="button" disabled={!sdk} onClick={() => {cancelSearch(); setPicking({kind: 'origin', quick: true});}}>在地图上选点</button></div><button className="primary-button query-button" type="submit" disabled={!sdk || searchBusy || (!searchIntent && (!active || !destinations.length || loading))}>{(searchBusy || (loading && !searchIntent)) && <SpinnerGap className="spin" size={20}/>} {searchBusy ? '搜索中' : searchIntent ? '搜索地点' : loading ? '查询中' : '查询路线'}</button></form>
+    <MapView sdk={sdk} sdkError={sdkError} onReady={() => setMapReady(true)} origin={active} destinations={destinations} results={results} focusId={focusId} onFocus={setFocusId} onMapPick={pickPoint} picking={picking} pickBusy={pickBusy} cancelPicking={cancelPick} fitRevision={fitRevision}/>
+    <section className="results-section" aria-label="目的地路线查询结果" aria-busy={loading}><div className="results-heading"><h2>目的地与耗时</h2><p>点击时长，在地图中查看对应路线</p><button className="text-button add-destination" disabled={!sdk} onClick={() => openEditor('destination')}><Plus size={21}/>添加目的地</button></div><div className="results-table-scroll"><table className="results-table"><thead><tr><th scope="col" className="destination-column">目的地</th>{MODES.map(mode => {const Icon = MODE_ICONS[mode.id]; return <th scope="col" key={mode.id}><span className="mode-heading"><Icon size={25}/>{mode.name}</span></th>;})}<th scope="col" className="actions-column"><span className="sr-only">地点操作</span></th></tr></thead><tbody>{destinations.map((d, index) => {
+      const color = colorFor(d);
+      return <tr key={d.id} className={focusId === d.id ? 'focused-row' : ''}><th scope="row"><button className="destination-name" onClick={() => setFocusId(d.id)} title={d.address}><span className="destination-letter" style={{background: color}}>{letter(index)}</span><span>{d.name}</span></button></th>{MODES.map(mode => {
+        const route = results?.[d.id]?.[mode.id], success = route?.status === 'success', selected = d.mode === mode.id && success, pending = active && (!route || route.status === 'pending');
+        const label = !active ? '请先添加出发地' : success ? distanceLabel(route.distance) + ' · 点击查看路线' : route?.reason || '正在查询';
+        return <td key={mode.id}><button type="button" className={'time-cell' + (selected ? ' selected' : '') + (pending ? ' pending' : '') + (route?.status === 'error' ? ' route-error' : '')} style={{'--route-color': color, '--route-tint': color + '20'}} aria-pressed={selected} aria-label={d.name + '，' + mode.name + '，' + (success ? route.minutes + '分钟，' + distanceLabel(route.distance) : label)} disabled={!success} title={label} onClick={() => selectMode(d, mode)}>{pending ? <span className="loading-dots" aria-label="查询中">···</span> : !active ? <span className="missing-time">—</span> : success ? <>{selected && <Check size={21} weight="bold"/>}<span>{route.minutes}<span className="minutes-unit"> 分钟</span></span></> : <span className="unsupported-time">{route?.status === 'no-route' ? '暂无路线' : '查询失败'}</span>}</button></td>;
+      })}<td className="row-actions"><IconButton label={'编辑' + d.name} onClick={() => openEditor('destination', d)}><PencilSimple size={21}/></IconButton><IconButton label={'删除' + d.name} onClick={() => deleteDestination(d)}><X size={21}/></IconButton></td></tr>;
+    })}</tbody></table></div>{!destinations.length && <div className="destinations-empty"><MapPin size={29}/><h3>添加一个目的地</h3><p>设置出发地和目的地后，查看四种出行方式的真实路线与预计耗时。</p><button className="primary-button" disabled={!sdk} onClick={() => openEditor('destination')}><Plus size={18}/>添加目的地</button></div>}{routeErrors.length > 0 && <p className="route-error-notice" role="status"><Info size={16}/>{routeErrors[0].reason}，可点击“查询路线”重试。</p>}<div className="sr-only" role="status" aria-live="polite">{loading ? '正在查询路线' : active && destinations.length ? active.name + '的路线查询已结束' : '请设置出发地和目的地'}</div></section>
+    <footer className="app-footer"><span>数据来源：高德地图 · 耗时为查询时的预估{batch?.key === requestKey && batch.queriedAt ? ' · ' + new Date(batch.queriedAt).toLocaleTimeString('zh-CN', {hour12: false}) : ''}</span><button onClick={() => setInfoOpen(true)}><Info size={15}/><span>使用说明</span></button></footer>
+    {editor && <PlaceEditor key={(editor.id || 'new-' + editor.kind) + (editor.selected?.point?.join(',') || '')} sdk={sdk} city={active?.city} editor={editor} onClose={() => setEditor(null)} onSave={saveEditor} onPick={draft => {setEditor(null); cancelPick(); setPicking({kind: draft.kind, editor: draft});}}/>}
+    {infoOpen && <Dialog title="路线查询使用说明" onClose={() => setInfoOpen(false)}><div className="demo-info-icon"><MapTrifold size={30}/></div><p>搜索或在地图上选点，设置一个出发地和多个目的地。添加更多出发地后，点击顶部页签切换，目的地保持不变。</p><p>每个目的地分别查询驾车、公交地铁、骑行与步行。点击时长，可在地图上查看该方式的路线。无可用结果时会显示“暂无路线”或失败提示。</p><p>预计耗时来自高德，受路况、班次和服务覆盖范围影响。这里只查询当前出发地，修改地点或重新查询会更新结果。</p><p className="demo-info-small">地点仅保存在当前页面，刷新后会清空。百度与开源方案尚未接入。</p><div className="dialog-actions"><button className="primary-button" onClick={() => setInfoOpen(false)}>知道了</button></div></Dialog>}
+    {toast && <div className="toast" role="status"><Check size={18}/><span>{toast.message}</span>{toast.undo && <button onClick={() => {toast.undo(); setToast(null); clearTimeout(toastTimer.current);}}>撤销</button>}<IconButton label="关闭提示" onClick={() => {setToast(null); clearTimeout(toastTimer.current);}}><X size={16}/></IconButton></div>}
+  </main>;
 }

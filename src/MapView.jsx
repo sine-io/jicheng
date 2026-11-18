@@ -1,29 +1,57 @@
-import {useEffect,useRef} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import {MapPin,Car,Bus,Bicycle,PersonSimpleWalk,ArrowsOut,Plus,Minus,Crosshair} from '@phosphor-icons/react';
-import {MAP_SIZE,MODES,colorFor,letter} from './model';
-const ICONS={driving:Car,transit:Bus,cycling:Bicycle,walking:PersonSimpleWalk};
-const ll=p=>[MAP_SIZE[1]-p[1],p[0]];
-function pinIcon(color,text,origin){return L.divIcon({className:'place-marker',html:renderToStaticMarkup(<div className={'pin-visual'+(origin?' origin-pin':'')} style={{color}}><MapPin size={45} weight="fill"/><span>{text}</span></div>),iconSize:[45,49],iconAnchor:[22.5,44]});}
-export default function MapView({origin,destinations,results,loading,focusId,onFocus,onMapPick,picking,cancelPicking,fitRevision}){
- const container=useRef(null),map=useRef(null),layers=useRef(null),callback=useRef(onMapPick),focusCallback=useRef(onFocus),currentPicking=useRef(picking),reset=useRef(()=>{});
- callback.current=onMapPick;focusCallback.current=onFocus;currentPicking.current=picking;
- useEffect(()=>{const instance=L.map(container.current,{crs:L.CRS.Simple,preferCanvas:true,zoomControl:false,attributionControl:false,minZoom:-3,maxZoom:3,zoomSnap:.1,zoomDelta:.5,scrollWheelZoom:false,doubleClickZoom:false,maxBounds:[[-170,-400],[MAP_SIZE[1]+170,MAP_SIZE[0]+400]],maxBoundsViscosity:.8});map.current=instance;
- L.imageOverlay('/assets/city-map.png',[[0,0],[MAP_SIZE[1],MAP_SIZE[0]]],{interactive:false}).addTo(instance);layers.current=L.layerGroup().addTo(instance);
- reset.current=()=>{const size=instance.getSize(),zoom=Math.log2(Math.max(size.x/MAP_SIZE[0],size.y/MAP_SIZE[1]));instance.setMinZoom(zoom-.4);instance.setMaxZoom(zoom+2.5);instance.setView([MAP_SIZE[1]*.49,MAP_SIZE[0]*.5],zoom,{animate:false});};reset.current();
- instance.on('click',event=>{if(!currentPicking.current)return;callback.current([Math.round(Math.max(60,Math.min(MAP_SIZE[0]-60,event.latlng.lng))),Math.round(Math.max(60,Math.min(MAP_SIZE[1]-60,MAP_SIZE[1]-event.latlng.lat)))]);});
- const observer=new ResizeObserver(()=>{instance.invalidateSize({animate:false});reset.current();});observer.observe(container.current);
- return()=>{observer.disconnect();instance.remove();map.current=null;};},[]);
- useEffect(()=>{reset.current();},[fitRevision,origin?.id]);
- useEffect(()=>{if(!map.current||!layers.current)return;layers.current.clearLayers();
- destinations.forEach((d,index)=>{const color=colorFor(d),route=results?.[d.id]?.[d.mode];
- if(origin&&!loading&&route?.supported&&route.path.length>1){const coords=route.path.map(ll),focused=!focusId||d.id===focusId;L.polyline(coords,{color:'#fff',weight:focused?10:8,opacity:focused?.98:.75,lineCap:'round',lineJoin:'round',smoothFactor:.4}).addTo(layers.current);L.polyline(coords,{color,weight:focused?5:4,opacity:focused?1:.47,lineCap:'round',lineJoin:'round',smoothFactor:.4}).addTo(layers.current);}
- const Icon=ICONS[d.mode],mode=MODES.find(m=>m.id===d.mode),time=loading?'查询中…':route?.supported?route.minutes+'分钟':route?'暂不支持':'待查询';
- const html=renderToStaticMarkup(<div className="map-label-content"><span className="map-place-name"><b>{letter(index)}</b> {d.name}</span><span className="map-place-time" style={{color}}><Icon size={16} weight="bold"/>{mode.short} {time}</span></div>);
- const marker=L.marker(ll(d.point),{icon:pinIcon(color,'',false),title:d.name,keyboard:true}).addTo(layers.current);marker.bindTooltip(html,{permanent:true,direction:'right',offset:[19,-26],className:'route-tooltip'});marker.on('click',()=>{if(!currentPicking.current)focusCallback.current(d.id);});});
- if(origin){const marker=L.marker(ll(origin.point),{icon:pinIcon('#15354e','起',true),title:origin.name,zIndexOffset:1000}).addTo(layers.current);marker.bindTooltip(renderToStaticMarkup(<strong className="origin-label">{origin.name}</strong>),{permanent:true,direction:'bottom',offset:[0,9],className:'route-tooltip origin-tooltip'});}
- },[origin,destinations,results,loading,focusId]);
- return <section className={'map-workspace'+(picking?' picking':'')} aria-label="路线地图"><div className="map-canvas" ref={container} data-testid="route-map" role="application" aria-label={picking?'地图选点区域，点击设置地点':'示意路线地图，可拖动或使用缩放按钮'}/>{picking&&<div className="pick-banner" role="status"><Crosshair size={18}/>点击地图，设置{picking.kind==='origin'?'出发地':'目的地'}<button onClick={cancelPicking}>取消选点</button></div>}{!origin&&!picking&&<div className="map-empty-message">添加出发地，开始查看路线</div>}<div className="map-controls" aria-label="地图视图控制"><button className="fit-button" title="显示全部地点" aria-label="显示全部地点" onClick={()=>reset.current()}><ArrowsOut size={24}/></button><div className="zoom-controls"><button title="放大地图" aria-label="放大地图" onClick={()=>map.current?.zoomIn()}><Plus size={25}/></button><button title="缩小地图" aria-label="缩小地图" onClick={()=>map.current?.zoomOut()}><Minus size={25}/></button></div></div><span className="map-attribution">示意地图</span></section>;
+import {MapPin, Car, Bus, Bicycle, PersonSimpleWalk, ArrowsOut, Plus, Minus, Crosshair, SpinnerGap} from '@phosphor-icons/react';
+import {MODES, colorFor, letter} from './model';
+const ICONS = {driving: Car, transit: Bus, cycling: Bicycle, walking: PersonSimpleWalk};
+function pin(color, text, origin) {return renderToStaticMarkup(<div className={'pin-visual' + (origin ? ' origin-pin' : '')} style={{color}}><MapPin size={45} weight="fill"/><span>{text}</span></div>);}
+export default function MapView({sdk, sdkError, onReady, origin, destinations, results, focusId, onFocus, onMapPick, picking, pickBusy, cancelPicking, fitRevision}) {
+  const container = useRef(null), map = useRef(null), overlays = useRef([]), latest = useRef({}), reset = useRef(() => {});
+  const [initialized, setInitialized] = useState(false), [mapError, setMapError] = useState('');
+  latest.current = {onMapPick, onFocus, picking, onReady};
+  useEffect(() => {
+    if (!sdk) return;
+    let instance;
+    try {
+      instance = new sdk.Map(container.current, {viewMode: '2D', zoom: 11, center: [117.200, 39.125], resizeEnable: true, scrollWheel: true});
+      map.current = instance;
+      instance.on('complete', () => latest.current.onReady());
+      instance.on('click', event => {if (latest.current.picking) latest.current.onMapPick([event.lnglat.getLng(), event.lnglat.getLat()]);});
+      reset.current = () => {if (overlays.current.length) instance.setFitView(overlays.current, false, [60, 90, 70, 70], 16);};
+      setInitialized(true);
+    } catch {setMapError('地图初始化失败，请刷新页面重试');}
+    return () => {overlays.current = []; map.current = null; instance?.destroy();};
+  }, [sdk]);
+  useEffect(() => {map.current?.setDefaultCursor(picking ? 'crosshair' : 'grab');}, [picking, initialized]);
+  useEffect(() => {
+    if (!initialized || !map.current || !sdk) return;
+    const instance = map.current;
+    instance.remove(overlays.current);
+    const items = [], focusItems = [];
+    destinations.forEach((destination, index) => {
+      const color = colorFor(destination), route = results?.[destination.id]?.[destination.mode], focused = !focusId || focusId === destination.id;
+      if (origin && route?.status === 'success') for (const path of route.segments) {
+        const line = new sdk.Polyline({path, strokeColor: color, strokeWeight: focused ? 6 : 4, strokeOpacity: focused ? 1 : .42, isOutline: true, outlineColor: '#ffffff', borderWeight: 2, lineJoin: 'round', lineCap: 'round', zIndex: focused ? 70 : 60});
+        items.push(line);
+        if (focusId === destination.id) focusItems.push(line);
+      }
+      const Icon = ICONS[destination.mode], mode = MODES.find(m => m.id === destination.mode);
+      const time = !origin ? '待设置出发地' : !route || route.status === 'pending' ? '查询中…' : route.status === 'success' ? route.minutes + '分钟' : route.status === 'no-route' ? '暂无路线' : '查询失败';
+      const marker = new sdk.Marker({position: destination.point, content: pin(color, letter(index), false), offset: new sdk.Pixel(-22, -44), title: destination.name, zIndex: focused ? 120 : 110, bubble: false});
+      marker.setLabel({direction: 'right', offset: new sdk.Pixel(5, -15), content: renderToStaticMarkup(<div className="map-label-content"><span className="map-place-name">{destination.name}</span><span className="map-place-time" style={{color}}><Icon size={16} weight="bold"/>{mode.short} {time}</span></div>)});
+      marker.on('click', () => {if (!latest.current.picking) latest.current.onFocus(destination.id);});
+      items.push(marker);
+      if (focusId === destination.id) focusItems.push(marker);
+    });
+    if (origin) {
+      const marker = new sdk.Marker({position: origin.point, content: pin('#15354e', '起', true), offset: new sdk.Pixel(-22, -44), title: origin.name, zIndex: 150});
+      marker.setLabel({direction: 'bottom', offset: new sdk.Pixel(0, 6), content: renderToStaticMarkup(<strong className="origin-label">{origin.name}</strong>)});
+      items.push(marker);
+      if (focusId) focusItems.push(marker);
+    }
+    overlays.current = items; instance.add(items);
+    if (focusItems.length) instance.setFitView(focusItems, false, [60, 90, 70, 70], 16);
+  }, [initialized, sdk, origin, destinations, results, focusId]);
+  useEffect(() => {if (initialized) reset.current();}, [initialized, fitRevision]);
+  const error = sdkError || mapError;
+  return <section className={'map-workspace' + (picking ? ' picking' : '')} aria-label="高德路线地图"><div className="map-canvas" ref={container} data-testid="route-map" role="application" aria-label={picking ? '地图选点区域，点击设置地点' : '高德地图，可拖动或使用缩放按钮'}/>{error ? <div className="map-state-message map-load-error" role="alert"><MapPin size={30}/><strong>{error}</strong><button className="secondary-button" onClick={() => location.reload()}>重新加载</button></div> : !initialized ? <div className="map-state-message" role="status"><SpinnerGap size={28} className="spin"/><span>正在加载高德地图…</span></div> : null}{picking && <div className="pick-banner" role="status">{pickBusy ? <SpinnerGap className="spin" size={18}/> : <Crosshair size={18}/>} {pickBusy ? '正在识别地点…' : '点击地图，设置' + (picking.kind === 'origin' ? '出发地' : '目的地')}<button onClick={cancelPicking}>取消选点</button></div>}{initialized && !origin && !destinations.length && !picking && <div className="map-empty-message">先搜索地点，或在地图上选点</div>}<div className="map-controls" aria-label="地图视图控制"><button className="fit-button" title="显示全部地点" aria-label="显示全部地点" disabled={!initialized || (!origin && !destinations.length)} onClick={() => reset.current()}><ArrowsOut size={24}/></button><div className="zoom-controls"><button title="放大地图" aria-label="放大地图" disabled={!initialized} onClick={() => map.current?.zoomIn()}><Plus size={25}/></button><button title="缩小地图" aria-label="缩小地图" disabled={!initialized} onClick={() => map.current?.zoomOut()}><Minus size={25}/></button></div></div></section>;
 }
