@@ -124,3 +124,14 @@ test('does not follow or expose credential-bearing upstream redirects', async ()
   assert.equal(response.status, 502); assert.equal(response.headers.get('location'), null);
   assert.doesNotMatch(await response.text(), /jscode=secret|other.test/);
 });
+
+test('accepts SDK JSONP callbacks and rejects executable callback expressions', async () => {
+  const {mapApi} = await import('../worker/index.js');
+  const env = {AMAP_JS_KEY: 'key', AMAP_JS_SECURITY_CODE: 'secret'};
+  let calls = 0;
+  const fetcher = async () => {calls++; return new Response('AMap.callback({})', {headers: {'Content-Type': 'application/json'}});};
+  const valid = await mapApi(new Request('https://example.test/_AMapService/v3/place/text?callback=AMap.callback'), env, fetcher);
+  assert.equal(valid.status, 200); assert.match(valid.headers.get('content-type'), /application\/javascript/);
+  const invalid = await mapApi(new Request('https://example.test/_AMapService/v3/place/text?callback=alert(1)'), env, fetcher);
+  assert.equal(invalid.status, 400); assert.equal(calls, 1);
+});

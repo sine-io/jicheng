@@ -21,4 +21,18 @@ Full real-map browser flow and responsive loaded-map screenshots remain unverifi
 - All four JS route services receive the chosen origin/destination; transit receives city metadata.
 - Aborted queued jobs do not issue stale-origin queries.
 
-Production API verification will be recorded after deployment. Overall status: partial pending live verification.
+## Production verification
+
+Deployed owner-private to the existing Site. Verified with its already-available service access credential, retained only in session memory and sent only to this exact Site.
+
+- `/api/maps/config`: HTTP 200, provider amap, JS key present, security code absent.
+- Place search for a public Tianjin landmark: HTTP 200, high-trust provider info OK, two actual POIs returned.
+- Reverse geocoding: HTTP 200, actual address returned.
+- Driving: HTTP 200, provider info OK, one route with distance, duration and steps.
+- Transit: HTTP 200, provider info OK, three alternatives with segments.
+- Cycling: HTTP 200, provider errcode 0, route with distance, duration and steps.
+- Walking: HTTP 200, provider info ok, route with distance, duration and steps.
+
+Corrected a production-only incompatibility: Cloudflare Workers rejects Fetch redirect mode `error`; the proxy now uses `manual` and rejects redirect responses without exposing their Location. Added regression checks and a receiver-safe fetch adapter. JSONP callbacks are restricted to valid identifiers and served with JavaScript MIME type.
+
+The CUA live Site tab reached the normal ChatGPT login gate; no cloud-browser login session was available. The existing private audience was preserved. Full browser search/route interaction and loaded-map visual comparison remain unverified. Local layout, provider availability, usage dialog, server integration, production APIs and automated adapter behavior are checked. Overall status: implementation and live APIs verified; authenticated browser QA partial.

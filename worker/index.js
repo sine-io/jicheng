@@ -14,6 +14,10 @@ export async function mapApi(request, env, upstreamFetch = (input, init) => glob
   const styles = pathname === '/v4/map/styles';
   if (!styles && !SERVICE_PATH.test(pathname)) return json({error: 'UNSUPPORTED_MAP_ENDPOINT'}, 404);
   if (url.search.length > 16000) return json({error: 'QUERY_TOO_LONG'}, 414);
+  const callback = url.searchParams.get('callback');
+  if ((callback !== null && !/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(callback)) || (callback?.length || 0) > 128) {
+    return json({error: 'INVALID_CALLBACK'}, 400);
+  }
   const upstream = new URL(pathname, styles ? 'https://webapi.amap.com' : 'https://restapi.amap.com');
   upstream.search = url.search;
   // Bind requests to this Site's configured JS key, ignoring client credentials.
@@ -28,7 +32,7 @@ export async function mapApi(request, env, upstreamFetch = (input, init) => glob
       return json({error: 'MAP_UPSTREAM_REDIRECT', info: 'SERVICE_NOT_AVAILABLE'}, 502);
     }
     return new Response(response.body, {status: response.status, headers: {
-      'Content-Type': response.headers.get('Content-Type') || 'application/json; charset=utf-8',
+      'Content-Type': callback ? 'application/javascript; charset=utf-8' : response.headers.get('Content-Type') || 'application/json; charset=utf-8',
       'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
     }});
   } catch (error) {
