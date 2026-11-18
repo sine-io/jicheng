@@ -52,3 +52,14 @@ test('reads electric-bike times and paths from the independent v5 API response',
   const result = normalizeRoute('electric', electricResult({route: {paths: [{distance: '3000', cost: {duration: '700'}, steps: [{polyline: '117.2,39.1;117.21,39.11', road_name: '测试路'}]}]}}));
   assert.equal(result.status, 'success'); assert.equal(result.minutes, 12); assert.equal(result.distance, 3000); assert.equal(result.alternatives.length, 1);
 });
+
+test('reads top-level electric-bike duration from the verified live response shape', async () => {
+  const {electricResult, selectedRoute} = await import('../src/route-data.js');
+  const result = normalizeRoute('electric', electricResult({route: {paths: [
+    {distance: '3718', duration: '1111', steps: [{cost: {duration: '20'}, polyline: '117.2,39.1;117.21,39.11', road_name: '甲路'}]},
+    {distance: '4133', duration: '1052', steps: [{polyline: '117.2,39.1;117.22,39.12', road_name: '乙路'}]},
+  ]}}));
+  assert.equal(result.status, 'success'); assert.equal(result.minutes, 19); assert.equal(result.alternatives.length, 2);
+  const next = selectedRoute(result, 'route-1');
+  assert.equal(next.minutes, 18); assert.equal(next.distance, 4133); assert.equal(next.segments.length, 1);
+});

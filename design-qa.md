@@ -48,3 +48,12 @@ The CUA live Site tab reached the normal ChatGPT login gate; no cloud-browser lo
 - An ignored development-only fixture exercised the actual RouteOptions component. CUA selected option 2 and verified that selected state and displayed distance/time changed from 20 minutes / 8000 m to 19 minutes / 9500 m. This fixture is labeled as test data and is excluded from the production build.
 - Automated checks passed: 13 map adapter/route data cases and 15 Worker cases, including strategy 0, malformed alternatives, full-route switching, independent electric-bicycle response normalization, missing key, fixed upstream, and server-only Web key.
 - Authenticated full-page live browser QA remains limited by the existing login gate. Production multi-strategy requests are checked separately after publishing.
+
+
+## Electric-bicycle activation
+
+The independent Web-service key is now configured as a server-side Site secret. Runtime configuration reports electricBikeEnabled=true without returning the Web key or security code. The v5 electric-bicycle API returned HTTP 200, info OK and two real alternatives for the public test origin/destination.
+
+Live response paths place total travel time in path.duration, while individual steps contain cost.duration. Updated the adapter to prefer the provider's total duration and retain support for the previously documented nested path cost form. No duration is estimated or derived from the bicycle result. Regression tests cover this exact response shape, alternative switching and the enabled browser adapter path.
+
+The previous pending-key state in this document is superseded by this activation. Full authenticated live browser QA remains limited by the existing login gate; production API and actual response normalization are verified independently.

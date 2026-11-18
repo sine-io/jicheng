@@ -76,6 +76,6 @@ export function selectedRoute(result, id) {
   return next ? {...next, alternatives: result.alternatives} : result;
 }
 export function electricResult(data) {
-  return {routes: (data?.route?.paths || []).map(path => ({time: path.cost?.duration, distance: path.distance,
+  return {routes: (data?.route?.paths || []).map(path => ({time: path.duration ?? path.cost?.duration, distance: path.distance,
     steps: (path.steps || []).map(step => ({path: step.polyline, road: step.road_name}))}))};
 }

@@ -45,3 +45,18 @@ test('does not use bicycle routing when electric-bike service is unconfigured', 
   const result = await queryRoute({}, origin, destination, 'electric');
   assert.equal(result.status, 'unconfigured');
 });
+
+test('enabled electric-bike lookup uses the server and parses actual v5 duration fields', async () => {
+  const {mapCapabilities} = await import('../src/amap.js');
+  const originalFetch = globalThis.fetch;
+  mapCapabilities.electricBike = true;
+  globalThis.fetch = async (url, options) => {
+    assert.match(url, /^\/api\/maps\/electric-route\?/); assert.equal(options.cache, 'no-store');
+    return Response.json({status: '1', route: {paths: [{duration: '1111', distance: '3718', steps: [{polyline: '117.2,39.1;117.21,39.11'}]}]}});
+  };
+  try {
+    const result = await queryRoute({}, origin, destination, 'electric');
+    assert.equal(result.status, 'success'); assert.equal(result.minutes, 19); assert.equal(result.distance, 3718);
+    assert.equal(result.alternatives.length, 1);
+  } finally {globalThis.fetch = originalFetch; mapCapabilities.electricBike = false;}
+});
