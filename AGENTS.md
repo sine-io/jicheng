@@ -8,7 +8,8 @@
 - AMap JS API 2.0 is connected through a same-origin Worker proxy. User-owned runtime settings are AMAP_JS_KEY and AMAP_JS_SECURITY_CODE. Never commit credential values or return the security code to the browser.
 - Use real POIs, GCJ-02 geographic coordinates, and provider route times/paths. Never silently substitute fixture data or estimates.
 - Baidu and open-source providers remain disabled until actually configured and implemented.
-- Start with empty locations. One active origin, shared destinations, and four travel modes. No persistence was requested; locations remain in current-page memory.
+- Bicycle and electric bicycle must remain distinct; never estimate one from the other. Preserve all usable alternatives returned by the provider. Driving defaults to v3 strategy 10 (高德推荐); allow 12, 0, 14, 13 as named preferences. Selected alternative must update time, distance, route geometry and toll data together.
+- Start with empty locations. One active origin, shared destinations, with driving, transit, bicycle, electric bicycle, and walking columns. Electric bicycle stays explicitly unavailable until AMAP_WEB_SERVICE_KEY is configured. No persistence was requested; locations remain in current-page memory.
 
 Run the local server yourself and open the preview in the browser available to this environment. Do not give the user server-start instructions when you can run it.
 

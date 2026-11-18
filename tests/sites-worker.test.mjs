@@ -69,7 +69,7 @@ test("emits the files required by Sites packaging", async () => {
 
 test('browser config exposes the JS key but never the security code', async () => {
   const response = await worker.fetch(new Request('https://example.test/api/maps/config'), {AMAP_JS_KEY: 'public-test-key', AMAP_JS_SECURITY_CODE: 'private-test-code'});
-  assert.deepEqual(await response.json(), {provider: 'amap', jsKey: 'public-test-key'});
+  assert.deepEqual(await response.json(), {provider: 'amap', jsKey: 'public-test-key', electricBikeEnabled: false});
   assert.match(response.headers.get('cache-control'), /no-store/);
 });
 test('missing map configuration fails explicitly without falling back to HTML', async () => {
@@ -134,4 +134,27 @@ test('accepts SDK JSONP callbacks and rejects executable callback expressions', 
   assert.equal(valid.status, 200); assert.match(valid.headers.get('content-type'), /application\/javascript/);
   const invalid = await mapApi(new Request('https://example.test/_AMapService/v3/place/text?callback=alert(1)'), env, fetcher);
   assert.equal(invalid.status, 400); assert.equal(calls, 1);
+});
+
+test('electric-bike config exposes availability only and leaves its Web key on the server', async () => {
+  const response = await worker.fetch(new Request('https://example.test/api/maps/config'), {AMAP_JS_KEY: 'js-key', AMAP_JS_SECURITY_CODE: 'secret-code', AMAP_WEB_SERVICE_KEY: 'web-secret'});
+  assert.deepEqual(await response.json(), {provider: 'amap', jsKey: 'js-key', electricBikeEnabled: true});
+});
+test('electric-bike planning uses the separate Web API key and requests actual alternatives', async () => {
+  const {mapApi} = await import('../worker/index.js');
+  let outgoing;
+  const response = await mapApi(new Request('https://example.test/api/maps/electric-route?origin=117.2,39.1&destination=117.3,39.2&key=attacker'), {AMAP_WEB_SERVICE_KEY: 'web-secret'}, async (url, init) => {
+    outgoing = {url, init}; return Response.json({status: '1', info: 'OK', route: {paths: []}, ignored_secret: 'web-secret'});
+  });
+  assert.equal(outgoing.url.origin, 'https://restapi.amap.com'); assert.equal(outgoing.url.pathname, '/v5/direction/electrobike');
+  assert.equal(outgoing.url.searchParams.get('key'), 'web-secret'); assert.equal(outgoing.url.searchParams.get('alternative_route'), '3');
+  assert.equal(outgoing.url.searchParams.get('show_fields'), 'cost,polyline'); assert.equal(outgoing.init.redirect, 'manual');
+  assert.doesNotMatch(await response.text(), /web-secret/);
+});
+test('electric-bike planning rejects missing configuration and invalid coordinates without upstream requests', async () => {
+  const {mapApi} = await import('../worker/index.js'); let calls = 0;
+  const request = new Request('https://example.test/api/maps/electric-route?origin=400,300&destination=117.2,39.1');
+  assert.equal((await mapApi(request, {}, () => {calls++;})).status, 503);
+  assert.equal((await mapApi(request, {AMAP_WEB_SERVICE_KEY: 'key'}, () => {calls++;})).status, 400);
+  assert.equal(calls, 0);
 });

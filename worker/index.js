@@ -3,13 +3,34 @@ const SERVICE_PATH = /^\/(?:v3|v4|v5)\/(?:place\/(?:text|detail|around)|geocode\
 function json(data, status = 200) {
   return Response.json(data, {status, headers: {'Cache-Control': 'private, no-store'}});
 }
+async function electricRoute(request, env, upstreamFetch) {
+  if (request.method !== 'GET') return json({error: 'METHOD_NOT_ALLOWED'}, 405);
+  if (!env.AMAP_WEB_SERVICE_KEY) return json({error: 'ELECTRIC_BIKE_NOT_CONFIGURED', info: '电动车路线待接入'}, 503);
+  const incoming = new URL(request.url);
+  const parse = value => {
+    if (!value || !/^-?\d{1,3}(?:\.\d{1,6})?,-?\d{1,2}(?:\.\d{1,6})?$/.test(value)) return null;
+    const [lng, lat] = value.split(',').map(Number);
+    return Math.abs(lng) <= 180 && Math.abs(lat) <= 90 ? value : null;
+  };
+  const origin = parse(incoming.searchParams.get('origin')), destination = parse(incoming.searchParams.get('destination'));
+  if (!origin || !destination) return json({error: 'INVALID_COORDINATES'}, 400);
+  const upstream = new URL('https://restapi.amap.com/v5/direction/electrobike');
+  upstream.search = new URLSearchParams({key: env.AMAP_WEB_SERVICE_KEY, origin, destination, alternative_route: '3', show_fields: 'cost,polyline', output: 'json'}).toString();
+  try {
+    const response = await upstreamFetch(upstream, {redirect: 'manual', signal: AbortSignal.timeout(18000)});
+    if (!response.ok) return json({error: 'MAP_UPSTREAM_UNAVAILABLE', info: 'SERVICE_NOT_AVAILABLE'}, 502);
+    const data = await response.json();
+    return json({status: data.status, info: data.info, infocode: data.infocode, route: data.route});
+  } catch {return json({error: 'MAP_UPSTREAM_UNAVAILABLE', info: 'SERVICE_NOT_AVAILABLE'}, 502);}
+}
 export async function mapApi(request, env, upstreamFetch = (input, init) => globalThis.fetch(input, init)) {
   const url = new URL(request.url);
+  if (url.pathname === '/api/maps/electric-route') return electricRoute(request, env, upstreamFetch);
   const config = url.pathname === '/api/maps/config';
   if (!config && url.pathname !== SERVICE_PREFIX && !url.pathname.startsWith(SERVICE_PREFIX + '/')) return null;
   if (request.method !== 'GET') return json({error: 'METHOD_NOT_ALLOWED'}, 405);
   if (!env.AMAP_JS_KEY || !env.AMAP_JS_SECURITY_CODE) return json({error: 'MAP_NOT_CONFIGURED', message: '地图服务尚未完成配置'}, 503);
-  if (config) return json({provider: 'amap', jsKey: env.AMAP_JS_KEY});
+  if (config) return json({provider: 'amap', jsKey: env.AMAP_JS_KEY, electricBikeEnabled: Boolean(env.AMAP_WEB_SERVICE_KEY)});
   const pathname = url.pathname.slice(SERVICE_PREFIX.length);
   const styles = pathname === '/v4/map/styles';
   if (!styles && !SERVICE_PATH.test(pathname)) return json({error: 'UNSUPPORTED_MAP_ENDPOINT'}, 404);

@@ -2,7 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {MapPin, Car, Bus, Bicycle, PersonSimpleWalk, ArrowsOut, Plus, Minus, Crosshair, SpinnerGap} from '@phosphor-icons/react';
 import {MODES, colorFor, letter} from './model';
-const ICONS = {driving: Car, transit: Bus, cycling: Bicycle, walking: PersonSimpleWalk};
+const ICONS = {driving: Car, transit: Bus, cycling: Bicycle, electric: Bicycle, walking: PersonSimpleWalk};
 function pin(color, text, origin) {return renderToStaticMarkup(<div className={'pin-visual' + (origin ? ' origin-pin' : '')} style={{color}}><MapPin size={45} weight="fill"/><span>{text}</span></div>);}
 export default function MapView({sdk, sdkError, onReady, origin, destinations, results, focusId, onFocus, onMapPick, picking, pickBusy, cancelPicking, fitRevision}) {
   const container = useRef(null), map = useRef(null), overlays = useRef([]), latest = useRef({}), reset = useRef(() => {});

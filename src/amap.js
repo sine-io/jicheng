@@ -1,5 +1,6 @@
-import {coordinates, normalizeRoute, placeFromPoi, routeFailure} from './route-data.js';
+import {coordinates, normalizeRoute, placeFromPoi, routeFailure, electricResult} from './route-data.js';
 let sdkPromise;
+export const mapCapabilities = {electricBike: false};
 export function loadAMap() {
   if (sdkPromise) return sdkPromise;
   sdkPromise = (async () => {
@@ -10,6 +11,7 @@ export function loadAMap() {
       config = await response.json();
     } catch {throw new Error('地图服务连接失败，请稍后刷新重试');}
     if (!config.jsKey) throw new Error('地图服务配置不完整');
+    mapCapabilities.electricBike = config.electricBikeEnabled === true;
     window._AMapSecurityConfig = {serviceHost: location.origin + '/_AMapService'};
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
@@ -68,12 +70,25 @@ export async function reversePlace(AMap, point, signal) {
   const city = component.citycode || (typeof component.city === 'string' ? component.city : '') || component.province || component.adcode;
   return {name: data.formattedAddress || '地图选点', point: coordinates(point), address: data.formattedAddress || '地图选点', city};
 }
-export async function queryRoute(AMap, origin, destination, mode, signal) {
-  if (origin.point.every((v, i) => Math.abs(v - destination.point[i]) < 1e-7)) return {status: 'success', minutes: 0, seconds: 0, distance: 0, segments: []};
+export async function queryRoute(AMap, origin, destination, mode, signal, {drivingPolicy = 10} = {}) {
+  if (mode === 'electric' && !mapCapabilities.electricBike) return {status: 'unconfigured', reason: '电动车路线待接入'};
+  if (origin.point.every((v, i) => Math.abs(v - destination.point[i]) < 1e-7)) {
+    const route = {status: 'success', id: 'route-0', providerIndex: 0, minutes: 0, seconds: 0, distance: 0, segments: []};
+    return {...route, alternatives: [route]};
+  }
   if (mode === 'transit' && (!origin.city || !destination.city)) return {status: 'error', reason: '地点缺少城市信息，请重新搜索或选点'};
+  if (mode === 'electric') {
+    return scheduled(async () => {
+      const params = new URLSearchParams({origin: origin.point.map(n => n.toFixed(6)).join(','), destination: destination.point.map(n => n.toFixed(6)).join(',')});
+      const response = await fetch('/api/maps/electric-route?' + params, {signal, cache: 'no-store'});
+      const data = await response.json();
+      if (!response.ok || data.status !== '1') return routeFailure('error', data);
+      return normalizeRoute(mode, electricResult(data));
+    }, signal);
+  }
   const result = await scheduled(() => sdkCall(callback => {
     let service;
-    if (mode === 'driving') service = new AMap.Driving({extensions: 'all'});
+    if (mode === 'driving') service = new AMap.Driving({extensions: 'all', policy: drivingPolicy});
     else if (mode === 'transit') service = new AMap.Transfer({city: origin.city, cityd: destination.city, extensions: 'all'});
     else if (mode === 'cycling') service = new AMap.Riding();
     else service = new AMap.Walking();

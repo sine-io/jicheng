@@ -31,3 +31,17 @@ test('real search and reverse geocoding preserve city and coordinates', async ()
   const [place] = await searchPlaces(sdk, '地点'); assert.deepEqual(place.point, origin.point); assert.equal(place.city, '022');
   const reversed = await reversePlace(sdk, origin.point); assert.equal(reversed.city, '022'); assert.deepEqual(reversed.point, origin.point);
 });
+
+test('forwards explicit driving strategies including zero for speed priority', async () => {
+  const policies = [];
+  const sdk = {Driving: class {
+    constructor(options) {policies.push(options.policy);}
+    search(from, to, callback) {callback('complete', {routes: [{time: 60, distance: 100, steps: [{path}]}]});}
+  }};
+  for (const drivingPolicy of [10, 12, 0]) await queryRoute(sdk, origin, destination, 'driving', undefined, {drivingPolicy});
+  assert.deepEqual(policies, [10, 12, 0]);
+});
+test('does not use bicycle routing when electric-bike service is unconfigured', async () => {
+  const result = await queryRoute({}, origin, destination, 'electric');
+  assert.equal(result.status, 'unconfigured');
+});

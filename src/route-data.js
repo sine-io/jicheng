@@ -39,8 +39,7 @@ export function routeFailure(status, data) {
   if (status === 'no_data') return {status: 'no-route', reason: '高德未返回可用路线'};
   return {status: 'error', reason: messages[code] || '高德查询失败，请稍后重试', code};
 }
-export function normalizeRoute(mode, data) {
-  const route = mode === 'transit' ? data?.plans?.[0] : data?.routes?.[0];
+function normalizeOne(mode, route, index) {
   if (!route) return {status: 'no-route', reason: '高德未返回可用路线'};
   const seconds = Number(route.time), distance = Number(route.distance);
   if (route.time == null || route.time === '' || !Number.isFinite(seconds) || seconds < 0 || route.distance == null || route.distance === '' || !Number.isFinite(distance) || distance < 0) {
@@ -55,5 +54,28 @@ export function normalizeRoute(mode, data) {
   } else pieces = (mode === 'cycling' ? route.rides || route.steps || [] : route.steps || []).map(step => step.path);
   const segments = pieces.map(pathOf).filter(points => points.length > 1);
   if (!segments.length && distance > 0) return {status: 'error', reason: '高德未返回可绘制的路线，请重试'};
-  return {status: 'success', minutes: Math.ceil(seconds / 60), seconds, distance, segments};
+  const roads = mode === 'transit'
+    ? (route.segments || []).flatMap(segment => (segment.transit?.lines || []).map(line => scalar(line.name)))
+    : (route.rides || route.steps || []).map(step => scalar(step.road || step.road_name));
+  const summary = [...new Set(roads.filter(Boolean))].slice(0, 3).join(' → ');
+  const tolls = Number(route.tolls);
+  return {status: 'success', id: 'route-' + index, providerIndex: index, minutes: Math.ceil(seconds / 60), seconds, distance, segments, summary,
+    tolls: mode === 'driving' && (typeof route.tolls === 'number' || typeof route.tolls === 'string' && route.tolls.trim() !== '') && Number.isFinite(tolls) ? tolls : null};
+}
+export function normalizeRoute(mode, data) {
+  const source = mode === 'transit' ? data?.plans : data?.routes;
+  if (!source?.length) return {status: 'no-route', reason: '高德未返回可用路线'};
+  const candidates = source.map((route, index) => normalizeOne(mode, route, index));
+  const alternatives = candidates.filter(route => route.status === 'success');
+  if (!alternatives.length) return candidates[0];
+  // Keep provider order; selecting an alternative updates both the table and map.
+  return {...alternatives[0], alternatives};
+}
+export function selectedRoute(result, id) {
+  const next = result?.alternatives?.find(route => route.id === id);
+  return next ? {...next, alternatives: result.alternatives} : result;
+}
+export function electricResult(data) {
+  return {routes: (data?.route?.paths || []).map(path => ({time: path.cost?.duration, distance: path.distance,
+    steps: (path.steps || []).map(step => ({path: step.polyline, road: step.road_name}))}))};
 }

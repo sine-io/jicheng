@@ -36,3 +36,15 @@ Deployed owner-private to the existing Site. Verified with its already-available
 Corrected a production-only incompatibility: Cloudflare Workers rejects Fetch redirect mode `error`; the proxy now uses `manual` and rejects redirect responses without exposing their Location. Added regression checks and a receiver-safe fetch adapter. JSONP callbacks are restricted to valid identifiers and served with JavaScript MIME type.
 
 The CUA live Site tab reached the normal ChatGPT login gate; no cloud-browser login session was available. The existing private audience was preserved. Full browser search/route interaction and loaded-map visual comparison remain unverified. Local layout, provider availability, usage dialog, server integration, production APIs and automated adapter behavior are checked. Overall status: implementation and live APIs verified; authenticated browser QA partial.
+
+
+## Bicycle/electric bicycle and alternative routes update
+
+- Kept generic origin/destination layout; added explicit bicycle and electric-bicycle columns plus a compact driving-preference row.
+- Driving defaults to 高德推荐 (v3 policy 10); policies 12/0/14/13 cover avoid traffic, speed priority, lower tolls and no highways.
+- Retain all valid provider alternatives in provider order. The chosen option changes minutes, distance, geometry and toll data as one result. Changes to origin, destination or driving policy hide obsolete option panels and invalidate results.
+- Electric-bicycle backend adapter is ready for an independent Web-service Key; no such key is configured. UI says 待接入 and issues no electric-bicycle request. No bicycle-time conversion or simulated route is used.
+- Local CUA verified five table headings, availability wording, and changing the driving-preference select to 躲避拥堵.
+- An ignored development-only fixture exercised the actual RouteOptions component. CUA selected option 2 and verified that selected state and displayed distance/time changed from 20 minutes / 8000 m to 19 minutes / 9500 m. This fixture is labeled as test data and is excluded from the production build.
+- Automated checks passed: 13 map adapter/route data cases and 15 Worker cases, including strategy 0, malformed alternatives, full-route switching, independent electric-bicycle response normalization, missing key, fixed upstream, and server-only Web key.
+- Authenticated full-page live browser QA remains limited by the existing login gate. Production multi-strategy requests are checked separately after publishing.

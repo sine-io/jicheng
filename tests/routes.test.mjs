@@ -30,3 +30,25 @@ test('retains actual POI location and city; rejects unusable search results', ()
   assert.equal(placeFromPoi({name: 'no location'}), null);
   assert.equal(coordinates([400, 300]), null);
 });
+
+test('keeps alternatives in provider order and selects complete route data together', async () => {
+  const {selectedRoute} = await import('../src/route-data.js');
+  const result = normalizeRoute('driving', {routes: [
+    {time: 900, distance: 4000, tolls: 0, steps: [{path: [a, b], road: '甲路'}]},
+    {time: 600, distance: 5000, tolls: 5, steps: [{path: [[117.2, 39.1], [117.4, 39.3]], road: '乙路'}]},
+  ]});
+  assert.equal(result.alternatives.length, 2); assert.equal(result.minutes, 15);
+  const selected = selectedRoute(result, 'route-1');
+  assert.equal(selected.minutes, 10); assert.equal(selected.distance, 5000); assert.equal(selected.tolls, 5);
+  assert.match(selected.summary, /乙路/); assert.deepEqual(selected.segments[0][1], [117.4, 39.3]);
+  assert.equal(selected.alternatives, result.alternatives); assert.equal(selectedRoute(selected, 'invalid-id'), selected);
+});
+test('skips malformed alternatives while retaining other usable plans', () => {
+  const result = normalizeRoute('walking', {routes: [{time: 500, distance: 10}, {time: 600, distance: 1200, steps: [{path: [a, b]}]}]});
+  assert.equal(result.status, 'success'); assert.equal(result.providerIndex, 1); assert.equal(result.alternatives.length, 1);
+});
+test('reads electric-bike times and paths from the independent v5 API response', async () => {
+  const {electricResult} = await import('../src/route-data.js');
+  const result = normalizeRoute('electric', electricResult({route: {paths: [{distance: '3000', cost: {duration: '700'}, steps: [{polyline: '117.2,39.1;117.21,39.11', road_name: '测试路'}]}]}}));
+  assert.equal(result.status, 'success'); assert.equal(result.minutes, 12); assert.equal(result.distance, 3000); assert.equal(result.alternatives.length, 1);
+});
