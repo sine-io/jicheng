@@ -1,10 +1,11 @@
 module jicheng
 
-go 1.27.0
+go 1.26.0
 
 require (
 	github.com/a-h/templ v0.3.1118
 	github.com/gin-gonic/gin v1.12.0
+	github.com/natefinch/atomic v1.0.1
 )
 
 require (
@@ -32,7 +33,6 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
-	github.com/natefinch/atomic v1.0.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.0 // indirect

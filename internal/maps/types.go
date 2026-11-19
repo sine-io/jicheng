@@ -31,14 +31,26 @@ type Place struct {
 	Point      Point  `json:"point"`
 }
 type Route struct {
-	ID       string    `json:"id"`
-	Index    int       `json:"index"`
-	Minutes  int       `json:"minutes"`
-	Seconds  float64   `json:"seconds"`
-	Distance float64   `json:"distance"`
-	Segments [][]Point `json:"segments"`
-	Summary  string    `json:"summary"`
-	Tolls    *float64  `json:"tolls,omitempty"`
+	ID           string       `json:"id"`
+	Index        int          `json:"index"`
+	Minutes      int          `json:"minutes"`
+	Seconds      float64      `json:"seconds"`
+	Distance     float64      `json:"distance"`
+	Segments     [][]Point    `json:"segments"`
+	Summary      string       `json:"summary"`
+	Tolls        *float64     `json:"tolls,omitempty"`
+	Legs         []TransitLeg `json:"legs,omitempty"`
+	WalkDistance *float64     `json:"-"`
+	Transfers    *int         `json:"-"`
+}
+type TransitLeg struct {
+	Kind                           string   `json:"kind"`
+	PathStart                      int      `json:"pathStart"`
+	PathEnd                        int      `json:"pathEnd"`
+	Name, From, To, Entrance, Exit string   `json:"-"`
+	Minutes                        *int     `json:"-"`
+	Stops                          []string `json:"-"`
+	ViaCount                       *int     `json:"-"`
 }
 type Result struct {
 	Status       string  `json:"status"`

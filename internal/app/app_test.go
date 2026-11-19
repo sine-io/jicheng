@@ -20,9 +20,14 @@ import (
 
 type fixtureProvider struct {
 	mu      sync.Mutex
-	calls   int
+	calls   []routeCall
 	block   bool
 	started chan struct{}
+	release chan struct{}
+}
+type routeCall struct {
+	mode   string
+	policy int
 }
 
 func (f *fixtureProvider) Search(_ context.Context, q, city string) ([]maps.Place, error) {
@@ -33,19 +38,28 @@ func (f *fixtureProvider) Reverse(_ context.Context, p maps.Point) (maps.Place, 
 }
 func (f *fixtureProvider) Route(ctx context.Context, from, to maps.Place, mode string, policy int) maps.Result {
 	f.mu.Lock()
-	f.calls++
+	f.calls = append(f.calls, routeCall{mode, policy})
 	block := f.block
 	started := f.started
+	release := f.release
 	f.mu.Unlock()
 	if block {
 		select {
 		case started <- struct{}{}:
 		default:
 		}
-		<-ctx.Done()
-		return maps.Result{Status: "error", Reason: "cancelled"}
+		select {
+		case <-ctx.Done():
+			return maps.Result{Status: "error", Reason: "cancelled"}
+		case <-release:
+		}
 	}
-	return maps.Result{Status: "success", Alternatives: []maps.Route{{ID: "route-0", Index: 0, Minutes: 30, Seconds: 1800, Distance: 5000, Segments: [][]maps.Point{{from.Point, to.Point}}}, {ID: "route-1", Index: 1, Minutes: 20, Seconds: 1200, Distance: 4000, Segments: [][]maps.Point{{from.Point, {117.4, 39.3}, to.Point}}}}}
+	result := maps.Result{Status: "success", Alternatives: []maps.Route{{ID: "route-0", Index: 0, Minutes: 30, Seconds: 1800, Distance: 5000, Segments: [][]maps.Point{{from.Point, to.Point}}}, {ID: "route-1", Index: 1, Minutes: 20, Seconds: 1200, Distance: 4000, Segments: [][]maps.Point{{from.Point, {117.4, 39.3}, to.Point}}}}}
+	if mode == "transit" {
+		minutes, count := 18, 1
+		result.Alternatives[0].Legs = []maps.TransitLeg{{Kind: "metro", Name: "地铁5号线", From: "出发站", To: "到达站", Minutes: &minutes, ViaCount: &count, Stops: []string{"<测试站>"}, PathEnd: 1}}
+	}
+	return result
 }
 
 type browser struct {
@@ -143,7 +157,7 @@ func TestPartialCRUDAndAlternativeUpdates(t *testing.T) {
 		t.Fatal("query should return targeted HTML fragments")
 	}
 	f.mu.Lock()
-	calls := f.calls
+	calls := len(f.calls)
 	f.mu.Unlock()
 	if calls != 10 {
 		t.Fatalf("expected five travel modes for two destinations, got %d", calls)
@@ -189,7 +203,7 @@ func TestSwitchOriginsSharesDestinationsAndCancelsOldQuery(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("query not started")
 	}
-	b.post("policy", url.Values{"policy": {"12"}})
+	b.post("policy", url.Values{"mode": {"driving"}, "policy": {"12"}})
 	select {
 	case status := <-finished:
 		if status != 204 {
@@ -201,6 +215,77 @@ func TestSwitchOriginsSharesDestinationsAndCancelsOldQuery(t *testing.T) {
 	state = b.state()
 	if state["destinations"].([]any)[0].(map[string]any)["route"].(map[string]any)["status"] != "pending" {
 		t.Fatal("old results overwrote new query state")
+	}
+}
+func TestTransitPreferenceRequeriesOnlyTransit(t *testing.T) {
+	_, f, _, b := newTestApp(t)
+	b.add("origin", "出发地")
+	b.add("destination", "目的地甲")
+	b.add("destination", "目的地乙")
+	_, overview := b.post("query", nil)
+	if strings.Contains(overview, `id="route-policy"`) {
+		t.Fatal("overview should not show any mode preference")
+	}
+	id := b.state()["destinations"].([]any)[0].(map[string]any)["id"].(string)
+	_, transit := b.post("select-mode", url.Values{"id": {id}, "mode": {"transit"}})
+	if !strings.Contains(transit, "<span>公交·地铁</span>") || !strings.Contains(transit, "公交·地铁偏好") || !strings.Contains(transit, "地铁优先") || !strings.Contains(transit, "查看行程") || !strings.Contains(transit, "18 分钟") || !strings.Contains(transit, "&lt;测试站&gt;") || strings.Contains(transit, "驾车偏好") {
+		t.Fatal("transit preference or escaped itinerary missing")
+	}
+	status, _ := b.post("policy", url.Values{"mode": {"transit"}, "policy": {"14"}})
+	if status != http.StatusBadRequest {
+		t.Fatal("driving-only strategy accepted for transit")
+	}
+	status, waiting := b.post("policy", url.Values{"mode": {"transit"}, "policy": {"7"}})
+	if status != http.StatusOK || !strings.Contains(waiting, "正在查询公交·地铁路线") || !strings.Contains(waiting, `value="7" selected`) {
+		t.Fatal("mode panel should stay open with the new policy while pending")
+	}
+	f.mu.Lock()
+	f.calls = nil
+	f.started = make(chan struct{}, 10)
+	release := make(chan struct{})
+	f.release = release
+	f.block = true
+	f.mu.Unlock()
+	defer func() {
+		if release != nil {
+			close(release)
+		}
+	}()
+	finished := make(chan int, 1)
+	go func() { status, _ := b.post("query", nil); finished <- status }()
+	select {
+	case <-f.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("query not started")
+	}
+	_, driving := b.post("select-mode", url.Values{"id": {id}, "mode": {"driving"}})
+	if !strings.Contains(driving, "驾车偏好") || strings.Contains(driving, "地铁优先") {
+		t.Fatal("driving panel should show only driving preferences")
+	}
+	b.post("select-route", url.Values{"id": {id}, "mode": {"driving"}, "route": {"route-1"}})
+	close(release)
+	release = nil
+	select {
+	case status := <-finished:
+		if status != http.StatusOK {
+			t.Fatalf("query returned %d", status)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("query did not finish")
+	}
+	f.mu.Lock()
+	calls := append([]routeCall(nil), f.calls...)
+	f.mu.Unlock()
+	if len(calls) != 2 || calls[0] != (routeCall{"transit", 7}) || calls[1] != (routeCall{"transit", 7}) {
+		t.Fatalf("wrong modes or strategies refreshed: %+v", calls)
+	}
+	result := b.state()["destinations"].([]any)[0].(map[string]any)["route"].(map[string]any)
+	if result["selectedId"] != "route-1" {
+		t.Fatal("transit query must preserve a driving alternative selected while it ran")
+	}
+	_, walking := b.post("select-mode", url.Values{"id": {id}, "mode": {"walking"}})
+	if strings.Contains(walking, `id="route-policy"`) {
+		t.Fatal("walking should not show a preference")
 	}
 }
 func TestSessionCSRFAndTemplateEscaping(t *testing.T) {
@@ -231,6 +316,31 @@ func TestSessionCSRFAndTemplateEscaping(t *testing.T) {
 		t.Fatal("private key exposed")
 	}
 }
+func TestLocationHelpLinksToWindowsSettings(t *testing.T) {
+	application := New(Config{}, &fixtureProvider{})
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `href="ms-settings:privacy-location"`) {
+		t.Fatal("page must provide a usable Windows location settings link")
+	}
+}
+
+func TestCoordinateConversionProxy(t *testing.T) {
+	application := New(Config{JSKey: "public-test-key", SecurityCode: "private-test-code"}, &fixtureProvider{})
+	handler := application.Handler()
+	for path, want := range map[string]int{
+		"/v3/assistant/coordinate/convert": http.StatusBadRequest,
+		"/v4/assistant/coordinate/convert": http.StatusNotFound,
+	} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/_AMapService"+path+"?callback=invalid()", nil)
+		handler.ServeHTTP(response, request)
+		if response.Code != want {
+			t.Errorf("%s returned %d, want %d", path, response.Code, want)
+		}
+	}
+}
+
 func TestMapSelectionAndSSRRefreshIsolation(t *testing.T) {
 	_, _, _, b := newTestApp(t)
 	b.post("start-pick", url.Values{"quick": {"true"}})
@@ -282,14 +392,14 @@ func TestUnifiedSearchAndMultipleOriginAssignment(t *testing.T) {
 	}
 	b.post("query", nil)
 	f.mu.Lock()
-	calls := f.calls
+	calls := len(f.calls)
 	f.mu.Unlock()
 	if calls != 10 {
 		t.Fatalf("expected two destinations with five modes, got %d calls", calls)
 	}
 	b.post("submit", url.Values{"query": {"地图选择地点"}})
 	f.mu.Lock()
-	after := f.calls
+	after := len(f.calls)
 	f.mu.Unlock()
 	if after != calls || b.state()["origin"].(map[string]any)["id"] != first {
 		t.Fatal("search must not query routes or replace an origin")

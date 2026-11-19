@@ -15,7 +15,8 @@ type Policy struct {
 	Name string
 }
 
-var Policies = []Policy{{10, "高德推荐"}, {12, "躲避拥堵"}, {0, "速度优先"}, {14, "少收费"}, {13, "不走高速"}}
+var drivingPolicies = []Policy{{10, "高德推荐"}, {12, "躲避拥堵"}, {0, "速度优先"}, {14, "少收费"}, {13, "不走高速"}}
+var transitPolicies = []Policy{{0, "高德推荐"}, {7, "地铁优先"}, {3, "步行少"}, {2, "换乘少"}, {8, "时间短"}, {5, "不乘地铁"}}
 var Colors = []string{"#1680ff", "#ff8914", "#29b538", "#9867d8", "#e05c83", "#0a9f99", "#a47529", "#4668d2"}
 
 type Place struct {
@@ -58,7 +59,7 @@ type View struct {
 	Preview                      *maps.Place
 	SearchError                  string
 	Results                      map[string]map[string]maps.Result
-	Policy                       int
+	DrivingPolicy, TransitPolicy int
 	Dirty                        bool
 	FocusID, PanelID, PanelMode  string
 	Editor                       *Editor
@@ -90,13 +91,26 @@ func (v View) Cell(id, mode string) maps.Result {
 	return maps.Result{Status: "empty"}
 }
 func (v View) CanQuery() bool { return v.Active() != nil && len(v.Destinations) > 0 && v.WebConfigured }
-func (v View) PolicyName() string {
-	for _, p := range Policies {
-		if p.ID == v.Policy {
-			return p.Name
-		}
+func PoliciesFor(mode string) []Policy {
+	switch mode {
+	case "driving":
+		return drivingPolicies
+	case "transit":
+		return transitPolicies
 	}
-	return "高德推荐"
+	return nil
+}
+func (v View) ModePolicy(mode string) int {
+	if mode == "driving" {
+		return v.DrivingPolicy
+	}
+	if mode == "transit" {
+		return v.TransitPolicy
+	}
+	return 0
+}
+func CanInspectMode(mode string, result maps.Result) bool {
+	return result.Success() || len(PoliciesFor(mode)) > 0 && (result.Status == "no-route" || result.Status == "error")
 }
 func (v View) PanelPlace() *Place {
 	for _, p := range v.Destinations {
@@ -165,6 +179,43 @@ func CellTitle(result maps.Result) string {
 }
 func RouteSelected(result maps.Result, id string) bool {
 	return result.Success() && result.Selected().ID == id
+}
+
+func TransitLegTitle(route maps.Route, index int, destination string) string {
+	leg := route.Legs[index]
+	if leg.Kind == "walk" {
+		if index+1 == len(route.Legs) {
+			return "步行至" + destination
+		}
+		next := route.Legs[index+1]
+		if next.From != "" {
+			label := "步行至"
+			if index > 0 && route.Legs[index-1].Kind != "walk" {
+				label = "换乘步行至"
+			}
+			if next.Entrance != "" {
+				return label + next.From + " · " + next.Entrance
+			}
+			return label + next.From
+		}
+		return "步行"
+	}
+	return TransitLineName(leg)
+}
+
+func TransitLineName(leg maps.TransitLeg) string {
+	if leg.Name != "" {
+		return leg.Name
+	}
+	switch leg.Kind {
+	case "metro":
+		return "地铁"
+	case "rail":
+		return "铁路"
+	case "taxi":
+		return "出租车"
+	}
+	return "公交"
 }
 
 func pickLabel(v View) string {

@@ -62,14 +62,14 @@ docker compose up -d --build
 
 ## 从源码开发
 
-安装 Go 1.27+，设置三个高德环境变量后执行：
+安装 Go 1.26+，设置三个高德环境变量后执行：
 
 ```sh
 go tool templ generate
 go run -tags nomsgpack ./cmd/server
 ```
 
-没有设置 `LISTEN_ADDR` 时，程序默认监听 `:8080`。源码已经包含生成的 templ Go 文件，因此也可以直接 `go build`。首次构建需要联网下载 `go.mod` 中的依赖。
+没有设置 `LISTEN_ADDR` 时，程序默认监听 `127.0.0.1:8080`。源码已经包含生成的 templ Go 文件，因此也可以直接 `go build`。首次构建需要联网下载 `go.mod` 中的依赖。
 
 重新制作 Linux/Windows 可执行文件：在 Linux、macOS 或 Windows 的 Git Bash 中运行 `make release`，结果位于 `bin/linux-amd64` 和 `bin/windows-amd64`。Windows PowerShell 可直接交叉编译：
 
@@ -93,6 +93,6 @@ go build -tags nomsgpack -trimpath -o jicheng.exe ./cmd/server
 
 - 三种高德配置的类型要对应；Web 服务 Key 不能使用 JS Key 代替。
 - 使用 JS Key 域名白名单时，需允许实际访问域名；Web 服务 Key 的 IP 白名单需匹配实际服务器。
-- 原生程序通过环境变量读取配置，不会自动读取 `.env`；`.env` 由 Docker Compose 加载，`.env.local` 仅由 `scripts/dev.sh` 加载。
+- 本机直连时，可在右上角的「高德地图」配置中保存密钥到当前工作目录的 `.env`。原生程序从该文件读取高德配置，未填写的项回退到环境变量。Docker Compose 仍通过 `env_file` 加载 `.env`，不接受网页写入。
 - 地点保留在当前页面会话，刷新或重启程序后清空。
 - 此次交付是地图主界面的 Go 版。已有线上 Site 仍为此前版本；上线 Go 版需要支持 Go/Docker 的主机。

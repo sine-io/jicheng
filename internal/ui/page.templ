@@ -7,7 +7,7 @@ templ Icon(name string, size int) {
 	<svg width={ Number(size) } height={ Number(size) } viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><use href={ "/assets/icons.svg#" + name }></use></svg>
 }
 
-templ Page(v View) {
+templ Page(v View, editMap bool) {
 	<!DOCTYPE html>
 	<html lang="zh-CN">
 		<head>
@@ -16,6 +16,7 @@ templ Page(v View) {
 			<title>几程 · 多起点多终点地图</title>
 			<meta name="application-name" content="几程"/>
 			<meta name="description" content="几程：在地图上设置多个起点和终点，切换起点比较路线与耗时。把远近，换成时间。"/>
+			<link rel="icon" href="/assets/brand.svg" type="image/svg+xml"/>
 			<link rel="stylesheet" href="/assets/styles.css"/>
 			<script src="/assets/htmx.min.js" defer></script>
 			<script src="/assets/app.js" defer></script>
@@ -36,11 +37,29 @@ templ Page(v View) {
 				</section>
 				<header class="app-header">
 					<div class="brand">
-						@Icon("Path", 32)
+						<img class="brand-mark" src="/assets/brand.svg" width="38" height="38" alt=""/>
 						<div><h1>几程</h1><span>把远近，换成时间</span></div>
 					</div>
 					<div class="header-actions">
-						<div class="live-status"><span class="status-dot" id="map-status-dot"></span><strong>高德地图</strong><span id="map-status">连接中</span></div>
+						<details class="map-provider" id="map-provider">
+							<summary class="live-status">
+								<span class="status-dot" id="map-status-dot" aria-hidden="true"></span><strong>高德地图</strong>
+								<span id="map-status" aria-live="polite">
+									if v.MapConfigured {
+										连接中
+									} else {
+										未配置
+									}
+								</span>
+								@Icon("CaretDown", 15)
+							</summary>
+							<div class="provider-options" role="group" aria-label="地图服务">
+								<button type="button" data-open-map-settings aria-haspopup="dialog" aria-controls="map-settings-dialog"><strong>高德地图</strong><small>配置</small></button>
+								for _, name := range []string{"百度地图", "腾讯地图", "天地图", "自建地图"} {
+									<button type="button" disabled>{ name }<small>待接入</small></button>
+								}
+							</div>
+						</details>
 						<button type="button" class="help-button" data-open-help aria-label="使用说明">
 							@Icon("Info", 22)
 						</button>
@@ -53,15 +72,15 @@ templ Page(v View) {
 				<aside class="route-sidebar" id="route-sidebar" aria-label="起点终点与路线" hidden>
 					<div class="sidebar-heading">
 						<div><h2>路线与耗时</h2><p>切换起点，比较到各个终点的时间</p></div>
-						<button type="button" class="icon-button" data-collapse-panel aria-label="收起路线面板">
-							@Icon("Minus", 20)
-						</button>
+						<div class="sidebar-heading-actions">
+							<div id="route-actions">@RefreshRoutes(v)</div>
+							<button type="button" class="icon-button" data-collapse-panel aria-label="收起路线面板">
+								@Icon("Minus", 20)
+							</button>
+						</div>
 					</div>
 					<div id="origins">
 						@Origins(v)
-					</div>
-					<div id="preferences">
-						@Preferences(v)
 					</div>
 					<div class="sidebar-scroll">
 						<div id="route-options">
@@ -73,6 +92,9 @@ templ Page(v View) {
 					</div>
 				</aside>
 				<div class="map-controls">
+					<button type="button" id="map-locate" title="我的位置" aria-label="我的位置" disabled>
+						@Icon("GpsFix", 22)
+					</button>
 					<button type="button" id="map-fit" title="显示全部地点" aria-label="显示全部地点">
 						@Icon("ArrowsOut", 22)
 					</button>
@@ -97,6 +119,15 @@ templ Page(v View) {
 				<div id="notice" aria-live="polite">
 					@Notice(v)
 				</div>
+				@MapSettings(editMap)
+				<dialog class="app-dialog" id="location-help" aria-labelledby="location-help-heading">
+					<div class="dialog-heading"><h2 id="location-help-heading">定位权限</h2></div>
+					<p><strong>Windows 系统权限</strong><br/>在「设置 → 隐私 → 位置」打开位置服务和「允许应用访问你的位置」。如果有「允许桌面应用访问你的位置」，也请开启。</p>
+					<p><a href={ templ.SafeURL("ms-settings:privacy-location") }>打开 Windows 位置设置</a><br/>链接未打开时，按 Win + R，输入 <code>ms-settings:privacy-location</code> 并回车。</p>
+					<p><strong>Chrome 或 Edge 网站权限</strong><br/>点地址栏网址左侧的图标，找到「位置」，设为「允许」。如果没看到「位置」，先点「网站设置」或「此网站的权限」。</p>
+					<p>内置预览里找不到权限菜单时，在 Chrome 或 Edge 打开同一网址，再点「我的位置」。</p>
+					<form method="dialog" class="dialog-actions"><button type="submit" class="primary-button">返回地图</button></form>
+				</dialog>
 				<dialog class="app-dialog" id="help-dialog">
 					<div class="dialog-heading">
 						<h2>几程使用说明</h2>
@@ -114,6 +145,52 @@ templ Page(v View) {
 			</main>
 		</body>
 	</html>
+}
+
+templ MapSettings(editable bool) {
+	<dialog class="app-dialog" id="map-settings-dialog" aria-labelledby="map-settings-heading">
+		<div class="dialog-heading">
+			<h2 id="map-settings-heading">配置高德地图</h2>
+			<button type="button" class="icon-button" data-close-map-settings aria-label="关闭配置">
+				@Icon("X", 21)
+			</button>
+		</div>
+		if editable {
+			<form id="map-settings-form" method="post" action="/ui/save-map-settings" hx-post="/ui/save-map-settings" hx-target="#map-settings-feedback" hx-disabled-elt="find button[type=submit]">
+				<label class="form-label" for="amap-js-key">JS API Key</label>
+				<input class="form-input" type="password" id="amap-js-key" name="js_key" autocomplete="off" maxlength="128" required/>
+				<label class="form-label" for="amap-security-code">JS API 安全密钥</label>
+				<input class="form-input" type="password" id="amap-security-code" name="security_code" autocomplete="off" maxlength="128" required/>
+				<label class="form-label" for="amap-web-key">Web 服务 Key</label>
+				<input class="form-input" type="password" id="amap-web-key" name="web_key" autocomplete="off" maxlength="128" required/>
+				<div id="map-settings-feedback" aria-live="polite"></div>
+				<div class="dialog-actions">
+					<button type="button" class="secondary-button" data-close-map-settings>关闭</button>
+					<button type="submit" class="primary-button">保存配置</button>
+				</div>
+			</form>
+		} else {
+			<p>网页修改仅限本机直连。此环境的高德密钥由服务器配置。</p>
+		}
+	</dialog>
+}
+
+templ MapSettingsFeedback(message string, saved bool) {
+	if saved {
+		<p role="status">{ message }</p>
+	} else {
+		<p class="form-error" role="alert">{ message }</p>
+	}
+}
+
+templ MapSettingsSaved(v View, reload bool) {
+	if reload {
+		@MapSettingsFeedback("已保存到 .env。刷新页面后会应用新的 JS API Key；当前地点将清空。", true)
+		<button type="button" class="secondary-button" data-reload-map>刷新页面</button>
+	} else {
+		@MapSettingsFeedback("已保存到 .env。", true)
+	}
+	@Updates(v, []string{"search", "origins", "route-actions", "results", "route-options"})
 }
 
 templ Origins(v View) {
@@ -222,21 +299,10 @@ templ Search(v View) {
 	</div>
 }
 
-templ Preferences(v View) {
-	<div class="driving-preferences">
-		<label for="driving-policy">
-			@Icon("Car", 17)
-			驾车偏好
-		</label>
-		<select id="driving-policy" name="policy" aria-label="驾车偏好" hx-post="/ui/policy" hx-trigger="change" hx-sync="#route-sync:replace">
-			for _,p := range Policies {
-				<option value={ Number(p.ID) } selected?={ v.Policy==p.ID }>{ p.Name }</option>
-			}
-		</select>
-		<button type="button" class="icon-button refresh-routes" title="重新查询路线" aria-label="重新查询路线" disabled?={ !v.CanQuery()||v.Dirty } hx-post="/ui/refresh-routes" hx-sync="#route-sync:replace">
-			@Icon("Path", 19)
-		</button>
-	</div>
+templ RefreshRoutes(v View) {
+	<button type="button" class="icon-button" title="重新查询路线" aria-label="重新查询路线" disabled?={ !v.CanQuery()||v.Dirty } hx-post="/ui/refresh-routes" hx-sync="#route-sync:replace">
+		@Icon("Path", 19)
+	</button>
 }
 
 templ Results(v View) {
@@ -298,7 +364,7 @@ templ Results(v View) {
 templ TimeCell(v View, p Place, mode Mode) {
 	{{ result := v.Cell(p.ID, mode.ID) }}
 	<div class="mode-time">
-		<button type="button" class={ CellClass(p.Mode == mode.ID, result) } disabled?={ !result.Success() } aria-pressed={ fmt.Sprint(p.Mode == mode.ID && result.Success()) } aria-label={ p.Name + "，" + mode.Name + "，" + TimeLabel(result) } title={ CellTitle(result) } hx-post="/ui/select-mode" hx-vals={ Values("id", p.ID, "mode", mode.ID) }>
+		<button type="button" class={ CellClass(p.Mode == mode.ID, result) } disabled?={ !CanInspectMode(mode.ID, result) } aria-pressed={ fmt.Sprint(p.Mode == mode.ID && CanInspectMode(mode.ID, result)) } aria-label={ p.Name + "，" + mode.Name + "，" + TimeLabel(result) } title={ CellTitle(result) } hx-post="/ui/select-mode" hx-vals={ Values("id", p.ID, "mode", mode.ID) }>
 			@Icon(mode.Icon, 21)
 			<span class="mode-name">{ mode.Name }</span>
 			if result.Success() {
@@ -314,57 +380,172 @@ templ TimeCell(v View, p Place, mode Mode) {
 }
 
 templ Options(v View) {
-	if v.PanelPlace()!=nil&&v.PanelResult().Success() {
-		<section class="route-options-panel" data-route-detail aria-label={ v.PanelPlace().Name + "的备选路线" }>
+	{{ place, result, mode := v.PanelPlace(), v.PanelResult(), v.PanelModeValue() }}
+	if place!=nil {
+		<section class="route-options-panel" data-route-detail={ place.ID + ":" + mode.ID } aria-label={ place.Name + "的备选路线" }>
 			<div class="route-options-heading">
-				<div>
-					<h2>
-						{ v.PanelPlace().Name }
-						<span>
-							· { v.PanelModeValue().Name }
-							if v.PanelMode=="driving" {
-								· { v.PolicyName() }
-							}
-						</span>
-					</h2>
-					<p>
-						if len(v.PanelResult().Alternatives)>1 {
-							共 { Number(len(v.PanelResult().Alternatives)) } 条可选路线，点击后在地图上查看
-						} else {
-							高德本次仅返回 1 条可用路线
-						}
-					</p>
-				</div>
-				<button type="button" class="icon-button" aria-label="返回全部终点" hx-post="/ui/close-options">
+				<h2>{ place.Name }</h2>
+				<button type="button" class="icon-button" title="返回全部终点" aria-label="返回全部终点" hx-post="/ui/close-options">
 					@Icon("ArrowRight", 20)
 				</button>
 			</div>
-			<div class="route-option-cards">
-				for _,route := range v.PanelResult().Alternatives {
-					<button type="button" class={ "route-option-card",templ.KV("active",RouteSelected(v.PanelResult(),route.ID)) } aria-pressed={ fmt.Sprint(RouteSelected(v.PanelResult(), route.ID)) } hx-post="/ui/select-route" hx-vals={ Values("id", v.PanelID, "mode", v.PanelMode, "route", route.ID) }>
-						<span class="route-option-title">
-							方案 { Number(route.Index+1) }
-							if RouteSelected(v.PanelResult(),route.ID) {
-								@Icon("Check", 18)
-							}
-						</span><strong>{ Number(route.Minutes) }<span>分钟</span></strong>
-						<span class="route-option-metrics">
-							{ maps.DistanceLabel(route.Distance) }
-							if route.Tolls!=nil {
-								· 过路费约 { fmt.Sprintf("%.0f",*route.Tolls) } 元
-							}
-						</span>
-						<small>
-							if route.Summary!="" {
-								{ route.Summary }
-							} else {
-								高德返回的规划路线
-							}
-						</small>
-					</button>
+			<div class="route-mode-row">
+				<span>
+					@Icon(mode.Icon, 16)
+					<span>{ mode.Name }</span>
+				</span>
+				if policies := PoliciesFor(mode.ID); len(policies)>0 {
+					<select id="route-policy" class="route-policy" name="policy" aria-label={ mode.Name + "偏好" } hx-post="/ui/policy" hx-trigger="change" hx-sync="#route-sync:replace" hx-vals={ Values("mode", mode.ID) }>
+						for _,policy := range policies {
+							<option value={ Number(policy.ID) } selected?={ v.ModePolicy(mode.ID)==policy.ID }>{ policy.Name }</option>
+						}
+					</select>
 				}
 			</div>
+			if result.Success() {
+				<p class="route-option-count">{ Number(len(result.Alternatives)) } 条可选路线</p>
+				<div class="route-option-cards">
+					for _,route := range result.Alternatives {
+						{{ selected := RouteSelected(result, route.ID) }}
+						if mode.ID=="transit" {
+							<article class={ "transit-option", templ.KV("active", selected) }>
+								@RouteOption(v, route, selected)
+								if selected && len(route.Legs)>0 {
+									@TransitItinerary(place, route)
+								}
+							</article>
+						} else {
+							@RouteOption(v, route, selected)
+						}
+					}
+				</div>
+			} else {
+				<p class="route-option-count" role="status">
+					if result.Status=="pending" {
+						正在查询{ mode.Name }路线…
+					} else if result.Reason!="" {
+						{ result.Reason }
+					}
+				</p>
+			}
 		</section>
+	}
+}
+
+templ RouteOption(v View, route maps.Route, selected bool) {
+	<button type="button" id={ "route-option-"+route.ID } class={ "route-option-card",templ.KV("active",selected) } aria-pressed={ fmt.Sprint(selected) } hx-post="/ui/select-route" hx-vals={ Values("id", v.PanelID, "mode", v.PanelMode, "route", route.ID) }>
+		<span class="route-option-title">
+			方案 { Number(route.Index+1) }
+			if selected {
+				@Icon("Check", 18)
+			}
+		</span><strong>{ Number(route.Minutes) }<span>分钟</span></strong>
+		if v.PanelMode=="transit" && len(route.Legs)>0 {
+			<span class="transit-lines">
+				for _,leg := range route.Legs {
+					if leg.Kind!="walk" {
+						<span class={ "transit-line", leg.Kind }>{ TransitLineName(leg) }</span>
+					}
+				}
+			</span>
+			<span class="route-option-metrics transit-metrics">
+				<span>{ maps.DistanceLabel(route.Distance) }</span>
+				if route.WalkDistance!=nil {
+					<span>步行 { maps.DistanceLabel(*route.WalkDistance) }</span>
+				}
+				if route.Transfers!=nil {
+					if *route.Transfers==0 {
+						<span>无需换乘</span>
+					} else {
+						<span>换乘 { Number(*route.Transfers) } 次</span>
+					}
+				}
+			</span>
+		} else {
+			<span class="route-option-metrics">
+				{ maps.DistanceLabel(route.Distance) }
+				if route.Tolls!=nil {
+					· 过路费约 { fmt.Sprintf("%.0f",*route.Tolls) } 元
+				}
+			</span>
+			<small>
+				if route.Summary!="" {
+					{ route.Summary }
+				}
+			</small>
+		}
+	</button>
+}
+
+templ TransitItinerary(place *Place, route maps.Route) {
+	<details class="transit-itinerary" data-place={ place.ID } data-route={ route.ID }>
+		<summary><span class="itinerary-open">查看行程</span><span class="itinerary-close">收起行程</span>@Icon("CaretDown", 15)</summary>
+		<ol class="transit-timeline" aria-label="行程分段">
+			for index,leg := range route.Legs {
+				{{ title := TransitLegTitle(route, index, place.Name) }}
+				<li>
+					<span class={ "transit-leg-icon", leg.Kind } aria-hidden="true">
+						switch leg.Kind {
+							case "walk":
+								@Icon("PersonSimpleWalk", 15)
+							case "taxi":
+								@Icon("Car", 15)
+							case "metro", "rail":
+								铁
+							default:
+								@Icon("Bus", 15)
+						}
+					</span>
+					<div class="transit-leg-content">
+						if leg.PathEnd>leg.PathStart {
+							<button type="button" class="transit-leg-title" data-map-leg={ Number(index) } aria-pressed="false" title="在地图上查看这一段">
+								@TransitLegHeading(title, leg)
+							</button>
+						} else {
+							<div class="transit-leg-title">@TransitLegHeading(title, leg)</div>
+						}
+						if leg.From!="" || leg.To!="" {
+							<p class="transit-stations">
+								if leg.From!="" {
+									{ leg.From }上车
+								}
+								if leg.From!="" && leg.To!="" {
+									→
+								}
+								if leg.To!="" {
+									{ leg.To }下车
+									if leg.Exit!="" {
+										（{ leg.Exit }）
+									}
+								}
+							</p>
+						}
+						if len(leg.Stops)>0 && leg.ViaCount!=nil {
+							<details class="transit-stops">
+								<summary>{ Number(*leg.ViaCount) } 个途经站 @Icon("CaretDown", 12)</summary>
+								<ol>
+									for _,stop := range leg.Stops {
+										<li>{ stop }</li>
+									}
+								</ol>
+								if *leg.ViaCount>len(leg.Stops) {
+									<p class="transit-stations">高德未提供其余站名</p>
+								}
+							</details>
+						} else if leg.ViaCount!=nil && *leg.ViaCount>0 {
+							<p class="transit-stations">{ Number(*leg.ViaCount) } 个途经站 · 站名未提供</p>
+						}
+					</div>
+				</li>
+			}
+		</ol>
+	</details>
+}
+
+templ TransitLegHeading(title string, leg maps.TransitLeg) {
+	<span>{ title }</span>
+	if leg.Minutes!=nil {
+		<small>{ Number(*leg.Minutes) } 分钟</small>
 	}
 }
 
@@ -469,8 +650,8 @@ templ Updates(v View, targets []string) {
 					@Origins(v)
 				case "search":
 					@Search(v)
-				case "preferences":
-					@Preferences(v)
+				case "route-actions":
+					@RefreshRoutes(v)
 				case "results":
 					@Results(v)
 				case "route-options":

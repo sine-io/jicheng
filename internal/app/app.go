@@ -27,7 +27,7 @@ type Provider interface {
 	Reverse(context.Context, maps.Point) (maps.Place, error)
 	Route(context.Context, maps.Place, maps.Place, string, int) maps.Result
 }
-type Config struct{ JSKey, SecurityCode, WebKey, ProxyToken string }
+type Config struct{ JSKey, SecurityCode, WebKey, ProxyToken, LocalEnvFile string }
 type removed struct {
 	Kind  string
 	Place ui.Place
@@ -36,6 +36,7 @@ type removed struct {
 type workspace struct {
 	mu        sync.Mutex
 	owner     string
+	provider  Provider
 	view      ui.View
 	revision  uint64
 	searchSeq uint64
@@ -100,11 +101,12 @@ func (a *App) routes() {
 	router.GET("/api/map-state", a.mapState)
 	router.GET("/api/maps/config", func(c *gin.Context) {
 		c.Header("Cache-Control", "private, no-store")
-		if a.config.JSKey == "" || a.config.SecurityCode == "" {
+		config := a.currentConfig()
+		if config.JSKey == "" || config.SecurityCode == "" {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "MAP_NOT_CONFIGURED"})
 			return
 		}
-		c.JSON(200, gin.H{"provider": "amap", "jsKey": a.config.JSKey, "electricBikeEnabled": a.config.WebKey != ""})
+		c.JSON(200, gin.H{"provider": "amap", "jsKey": config.JSKey, "electricBikeEnabled": config.WebKey != ""})
 	})
 	router.GET("/_AMapService/*path", a.proxy)
 	a.handler = router
@@ -117,9 +119,9 @@ func (a *App) page(c *gin.Context) {
 		http.SetCookie(c.Writer, &http.Cookie{Name: "route_session", Value: session, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode})
 	}
 	id := token()
-	view := ui.View{Workspace: id, CSRF: token(), Origins: []ui.Place{}, Destinations: []ui.Place{}, Policy: 10, Results: map[string]map[string]maps.Result{}, MapConfigured: a.config.JSKey != "" && a.config.SecurityCode != "", WebConfigured: a.config.WebKey != ""}
-	w := &workspace{owner: session, view: view, updated: time.Now()}
 	a.mu.Lock()
+	view := ui.View{Workspace: id, CSRF: token(), Origins: []ui.Place{}, Destinations: []ui.Place{}, DrivingPolicy: 10, Results: map[string]map[string]maps.Result{}, MapConfigured: a.config.JSKey != "" && a.config.SecurityCode != "", WebConfigured: a.config.WebKey != ""}
+	w := &workspace{owner: session, provider: a.provider, view: view, updated: time.Now()}
 	for key, old := range a.workspaces {
 		old.mu.Lock()
 		expired := time.Since(old.updated) > 2*time.Hour
@@ -131,7 +133,13 @@ func (a *App) page(c *gin.Context) {
 	a.workspaces[id] = w
 	a.mu.Unlock()
 	c.Header("Cache-Control", "private, no-store")
-	a.render(c, ui.Page(view))
+	a.render(c, ui.Page(view, a.canEditMap(c.Request)))
+}
+
+func (a *App) currentConfig() Config {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.config
 }
 func (a *App) resolve(c *gin.Context, write bool) *workspace {
 	id := c.Query("workspace")
@@ -208,15 +216,18 @@ func (a *App) update(c *gin.Context, w *workspace, targets ...string) {
 	c.Header("HX-Trigger-After-Swap", `{"route:updated":true}`)
 	a.render(c, ui.Updates(v, targets))
 }
-func invalidate(w *workspace) {
+func cancelQuery(w *workspace) {
 	if w.cancel != nil {
 		w.cancel()
 		w.cancel = nil
 	}
 	w.queryID = ""
 	w.revision++
-	w.view.Results = map[string]map[string]maps.Result{}
 	w.view.Dirty = w.view.CanQuery()
+}
+func invalidate(w *workspace) {
+	cancelQuery(w)
+	w.view.Results = map[string]map[string]maps.Result{}
 	w.view.FocusID = ""
 	w.view.PanelID = ""
 	w.view.QueriedAt = ""
@@ -247,13 +258,14 @@ var servicePath = regexp.MustCompile(`^/(v3|v4|v5)/(place/(text|detail|around)|g
 var callbackPattern = regexp.MustCompile(`^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$`)
 
 func (a *App) proxy(c *gin.Context) {
-	if a.config.JSKey == "" || a.config.SecurityCode == "" {
+	config := a.currentConfig()
+	if config.JSKey == "" || config.SecurityCode == "" {
 		c.AbortWithStatus(503)
 		return
 	}
 	path := c.Param("path")
 	styles := path == "/v4/map/styles"
-	if !styles && !servicePath.MatchString(path) {
+	if !styles && path != "/v3/assistant/coordinate/convert" && !servicePath.MatchString(path) {
 		c.AbortWithStatus(404)
 		return
 	}
@@ -267,8 +279,8 @@ func (a *App) proxy(c *gin.Context) {
 		c.AbortWithStatus(400)
 		return
 	}
-	query.Set("key", a.config.JSKey)
-	query.Set("jscode", a.config.SecurityCode)
+	query.Set("key", config.JSKey)
+	query.Set("jscode", config.SecurityCode)
 	base := "https://restapi.amap.com"
 	if styles {
 		base = "https://webapi.amap.com"

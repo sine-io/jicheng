@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,10 +15,18 @@ import (
 )
 
 func main() {
-	config := app.Config{JSKey: os.Getenv("AMAP_JS_KEY"), SecurityCode: os.Getenv("AMAP_JS_SECURITY_CODE"), WebKey: os.Getenv("AMAP_WEB_SERVICE_KEY"), ProxyToken: os.Getenv("GO_PROXY_TOKEN")}
 	address := os.Getenv("LISTEN_ADDR")
 	if address == "" {
-		address = ":8080"
+		address = "127.0.0.1:8080"
+	}
+	config, err := app.LoadConfig(".env")
+	if err != nil {
+		slog.Error("could not read .env map settings")
+		os.Exit(1)
+	}
+	host, _, _ := net.SplitHostPort(address)
+	if net.ParseIP(host).IsLoopback() {
+		config.LocalEnvFile = ".env"
 	}
 	server := &http.Server{Addr: address, Handler: app.New(config, nil).Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 3 * time.Minute, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 1 << 20}
 	stopped := make(chan os.Signal, 1)

@@ -8,7 +8,7 @@
 - Search and direct map clicks preview a place; only explicit “设为起点” / “设为终点” saves it. Adding an origin appends and activates it, never silently replaces the previous origin. Shared destinations are independent trips, not waypoints. Duplicate assignment in the same list reuses the existing place.
 - Generic origins/destinations only. No family roles, house hunting, scores, schedules or sequential trips.
 - Multiple origin tabs, exactly one active origin, shared destinations. Begin with empty locations. Refresh creates a new page workspace; persistence was not requested.
-- Only AMap is implemented. Keep Baidu and open-source options disabled until genuinely integrated.
+- Only AMap is implemented. Keep Baidu, Tencent, Tianditu and self-hosted map options disabled until genuinely integrated.
 - Use real POIs, GCJ-02 coordinates, provider durations and paths. No simulated times, speed conversions or straight-line substitutes.
 - Bicycle and electric bicycle use independent APIs. Keep every usable provider alternative in provider order. Update duration, distance, geometry and toll data together.
 - Driving defaults to v3 strategy 10; named choices 12/0/14/13 remain available.
@@ -21,11 +21,11 @@
 - `internal/ui/page.templ` is the source; regenerate and commit `page_templ.go` together. Keep version-pinned `go tool templ` in go.mod.
 - Cancel outdated queries and guard revisions. Initialize all destination result rows before concurrent writes; run the race detector for changes to query/state code.
 - Each page workspace belongs to its HttpOnly browser session and requires its CSRF token for writes. Keep user-provided text escaped in HTML and map labels.
-- Read AMap keys only from runtime environment. JS security code and Web-service Key must never appear in frontend config, source, test snapshots, request logs or error URLs.
+- Read AMap keys only from runtime environment or the ignored `.env` file. Only direct loopback access to a loopback listener may save keys through the CSRF-protected settings form. JS security code and Web-service Key must never appear in frontend config, source, test snapshots, request logs or error URLs.
 
 ## Runtime and hosting
 
-- Build an actual native Go server with embedded assets. Go 1.27+, Gin 1.12.0, templ 0.3.1118, vendored htmx 2.0.11.
+- Build an actual native Go server with embedded assets. Go 1.26+, Gin 1.12.0, templ 0.3.1118, vendored htmx 2.0.11.
 - `make dev` starts the native app. In this workspace use the Sites managed preview CLI and its exact URL; do not start a second competing dev server.
 - `package.json` is only managed-preview orchestration, not a frontend build dependency. `worker/index.js` is only an optional gateway to an independently hosted Go process.
 - The existing Sites runtime cannot directly execute Go. Do not publish the gateway until `GO_APP_ORIGIN` and `GO_PROXY_TOKEN` are configured and verified. Preserve `.openai/hosting.json` project identity and existing Site audience.

@@ -12,7 +12,7 @@ import (
 	"jicheng/internal/ui"
 )
 
-var allTargets = []string{"origins", "search", "preferences", "results", "route-options", "modal", "picker-banner", "notice"}
+var allTargets = []string{"origins", "search", "route-actions", "results", "route-options", "modal", "picker-banner", "notice"}
 
 func (a *App) action(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
@@ -25,6 +25,10 @@ func (a *App) action(c *gin.Context) {
 		return
 	}
 	action := c.Param("action")
+	if action == "save-map-settings" {
+		a.saveMapSettings(c, w)
+		return
+	}
 	if action == "query" {
 		a.query(c, w)
 		return
@@ -198,24 +202,40 @@ func (a *App) action(c *gin.Context) {
 		targets = []string{"search"}
 	case "refresh-routes":
 		invalidate(w)
-		targets = []string{"results", "route-options", "notice"}
+		targets = []string{"route-actions", "results", "route-options", "notice"}
 	case "policy":
+		mode := c.PostForm("mode")
 		value, err := strconv.Atoi(c.PostForm("policy"))
 		valid := false
-		for _, p := range ui.Policies {
+		for _, p := range ui.PoliciesFor(mode) {
 			if p.ID == value {
 				valid = true
 			}
 		}
-		if err == nil && valid {
-			w.view.Policy = value
-			invalidate(w)
+		if err != nil || !valid {
+			w.mu.Unlock()
+			c.AbortWithStatus(400)
+			return
 		}
-		targets = []string{"preferences", "results", "route-options", "notice"}
+		if value == w.view.ModePolicy(mode) {
+			w.mu.Unlock()
+			c.Status(204)
+			return
+		}
+		if mode == "driving" {
+			w.view.DrivingPolicy = value
+		} else {
+			w.view.TransitPolicy = value
+		}
+		cancelQuery(w)
+		for _, row := range w.view.Results {
+			delete(row, mode)
+		}
+		targets = []string{"route-actions", "results", "route-options", "notice"}
 	case "select-mode":
 		id, mode := c.PostForm("id"), c.PostForm("mode")
 		result := w.view.Cell(id, mode)
-		if result.Success() {
+		if ui.CanInspectMode(mode, result) {
 			for i := range w.view.Destinations {
 				if w.view.Destinations[i].ID == id {
 					w.view.Destinations[i].Mode = mode
@@ -229,13 +249,15 @@ func (a *App) action(c *gin.Context) {
 	case "select-route":
 		id, mode, routeID := c.PostForm("id"), c.PostForm("mode"), c.PostForm("route")
 		result := w.view.Cell(id, mode)
+		if w.view.PanelID != id || w.view.PanelMode != mode || !result.Success() || result.Selected().ID == routeID {
+			w.mu.Unlock()
+			c.Status(204)
+			return
+		}
 		for _, route := range result.Alternatives {
 			if route.ID == routeID {
 				result.SelectedID = routeID
 				w.view.Results[id][mode] = result
-				w.view.FocusID = id
-				w.view.PanelID = id
-				w.view.PanelMode = mode
 				break
 			}
 		}
@@ -318,6 +340,7 @@ func (a *App) search(c *gin.Context, w *workspace, editor bool) {
 	}
 	w.searchSeq++
 	seq := w.searchSeq
+	provider := w.provider
 	city := ""
 	if active := w.view.Active(); active != nil {
 		city = active.City
@@ -326,7 +349,7 @@ func (a *App) search(c *gin.Context, w *workspace, editor bool) {
 	var choices []maps.Place
 	var err error
 	if query != "" {
-		choices, err = a.provider.Search(c.Request.Context(), query, city)
+		choices, err = provider.Search(c.Request.Context(), query, city)
 	}
 	if c.Request.Context().Err() != nil {
 		c.Status(204)
@@ -381,8 +404,9 @@ func (a *App) pick(c *gin.Context, w *workspace, inspect bool) {
 	revision := w.revision
 	quick := inspect || w.view.PickQuick
 	editor := w.view.Editor
+	provider := w.provider
 	w.mu.Unlock()
-	selected, err := a.provider.Reverse(c.Request.Context(), point)
+	selected, err := provider.Reverse(c.Request.Context(), point)
 	if c.Request.Context().Err() != nil {
 		c.Status(204)
 		return
@@ -412,7 +436,7 @@ func (a *App) pick(c *gin.Context, w *workspace, inspect bool) {
 }
 func (a *App) query(c *gin.Context, w *workspace) {
 	w.mu.Lock()
-	if !w.view.CanQuery() {
+	if !w.view.CanQuery() || !w.view.Dirty {
 		w.mu.Unlock()
 		c.Status(204)
 		return
@@ -426,6 +450,7 @@ func (a *App) query(c *gin.Context, w *workspace) {
 	w.queryID = id
 	revision := w.revision
 	view := snapshot(w)
+	provider := w.provider
 	w.mu.Unlock()
 	defer cancel()
 	origin := *view.Active()
@@ -437,10 +462,13 @@ func (a *App) query(c *gin.Context, w *workspace) {
 	}
 	for _, destination := range view.Destinations {
 		for _, mode := range ui.Modes {
+			if _, exists := view.Results[destination.ID][mode.ID]; exists {
+				continue
+			}
 			jobs.Add(1)
 			go func(destination ui.Place, mode ui.Mode) {
 				defer jobs.Done()
-				r := a.provider.Route(ctx, origin.Place, destination.Place, mode.ID, view.Policy)
+				r := provider.Route(ctx, origin.Place, destination.Place, mode.ID, view.ModePolicy(mode.ID))
 				lock.Lock()
 				result[destination.ID][mode.ID] = r
 				lock.Unlock()
@@ -454,12 +482,20 @@ func (a *App) query(c *gin.Context, w *workspace) {
 		c.Status(204)
 		return
 	}
-	w.view.Results = result
+	for destination, updates := range result {
+		if w.view.Results[destination] == nil {
+			w.view.Results[destination] = updates
+			continue
+		}
+		for mode, route := range updates {
+			w.view.Results[destination][mode] = route
+		}
+	}
 	w.view.Dirty = false
 	w.view.QueriedAt = time.Now().In(time.FixedZone("CST", 8*3600)).Format("15:04:05")
 	w.cancel = nil
 	w.mu.Unlock()
-	a.update(c, w, "results", "route-options", "notice")
+	a.update(c, w, "route-actions", "results", "route-options", "notice")
 }
 
 func clearSearch(w *workspace) {

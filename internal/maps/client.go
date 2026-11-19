@@ -157,13 +157,14 @@ func (c *Client) Route(ctx context.Context, origin, destination Place, mode stri
 		params.Set("strategy", strconv.Itoa(policy))
 		params.Set("extensions", "all")
 	case "transit":
-		if origin.City == "" || destination.City == "" {
-			return Result{Status: "error", Reason: "地点缺少城市信息，请重新设置地点"}
+		if !validCityCode(origin.City) || !validCityCode(destination.City) {
+			return Result{Status: "error", Reason: "地点缺少城市编码，请重新设置地点"}
 		}
-		path = "/v3/direction/transit/integrated"
-		params.Set("city", origin.City)
-		params.Set("cityd", destination.City)
-		params.Set("extensions", "all")
+		path = "/v5/direction/transit/integrated"
+		params.Set("city1", origin.City)
+		params.Set("city2", destination.City)
+		params.Set("strategy", strconv.Itoa(policy))
+		params.Set("show_fields", "cost,polyline")
 	case "cycling":
 		path = "/v4/direction/bicycling"
 	case "electric":
@@ -196,61 +197,32 @@ func Normalize(mode string, data map[string]any) Result {
 	routes := []Route{}
 	for index, value := range paths {
 		p := o(value)
-		duration := p["duration"]
-		if duration == nil {
-			duration = o(p["cost"])["duration"]
-		}
-		seconds, distance := n(duration), n(p["distance"])
-		if math.IsNaN(seconds) || math.IsNaN(distance) || seconds < 0 || distance < 0 {
+		seconds, distance := durationSeconds(p), quantity(p["distance"])
+		if seconds == nil || distance == nil {
 			continue
 		}
-		segments := [][]Point{}
-		roads := []string{}
-		add := func(poly any) {
-			points := parsePolyline(s(poly))
-			if len(points) > 1 {
-				segments = append(segments, points)
-			}
-		}
+		route := Route{ID: fmt.Sprintf("route-%d", index), Index: index, Minutes: minutes(*seconds), Seconds: *seconds, Distance: *distance, Segments: [][]Point{}}
 		if mode == "transit" {
-			for _, sv := range a(p["segments"]) {
-				sg := o(sv)
-				for _, step := range a(o(sg["walking"])["steps"]) {
-					add(o(step)["polyline"])
-				}
-				lines := a(o(sg["bus"])["buslines"])
-				if len(lines) > 0 {
-					line := o(lines[0])
-					add(line["polyline"])
-					roads = append(roads, s(line["name"]))
-				}
-				taxi := o(sg["taxi"])
-				add(taxi["polyline"])
-			}
+			normalizeTransit(&route, p)
 		} else {
+			roads := []string{}
 			for _, step := range a(p["steps"]) {
 				st := o(step)
-				add(st["polyline"])
+				route.addPath(st["polyline"])
 				road := s(st["road_name"])
 				if road == "" {
 					road = s(st["road"])
 				}
 				roads = append(roads, road)
 			}
+			roads = unique(roads)
+			route.Summary = strings.Join(roads[:min(3, len(roads))], " → ")
 		}
-		if distance > 0 && len(segments) == 0 {
+		if route.Distance > 0 && len(route.Segments) == 0 && len(route.Legs) == 0 {
 			continue
 		}
-		roads = unique(roads)
-		if len(roads) > 3 {
-			roads = roads[:3]
-		}
-		route := Route{ID: fmt.Sprintf("route-%d", index), Index: index, Minutes: int(math.Ceil(seconds / 60)), Seconds: seconds, Distance: distance, Segments: segments, Summary: strings.Join(roads, " → ")}
 		if mode == "driving" {
-			toll := n(p["tolls"])
-			if !math.IsNaN(toll) {
-				route.Tolls = &toll
-			}
+			route.Tolls = quantity(p["tolls"])
 		}
 		routes = append(routes, route)
 	}
@@ -258,6 +230,36 @@ func Normalize(mode string, data map[string]any) Result {
 		return Result{Status: "error", Reason: "高德返回的路线数据不完整，请重试"}
 	}
 	return Result{Status: "success", Alternatives: routes}
+}
+
+func (r *Route) addPath(value any) {
+	if geometry := o(value); geometry != nil {
+		value = geometry["polyline"]
+	}
+	if points := parsePolyline(s(value)); len(points) > 1 {
+		r.Segments = append(r.Segments, points)
+	}
+}
+
+func quantity(value any) *float64 {
+	valueNumber := n(value)
+	if math.IsNaN(valueNumber) || math.IsInf(valueNumber, 0) || valueNumber < 0 {
+		return nil
+	}
+	return &valueNumber
+}
+
+func durationSeconds(value map[string]any) *float64 {
+	if seconds := quantity(o(value["cost"])["duration"]); seconds != nil {
+		return seconds
+	}
+	return quantity(value["duration"])
+}
+
+func minutes(seconds float64) int { return int(math.Ceil(seconds / 60)) }
+
+func validCityCode(code string) bool {
+	return (len(code) == 3 || len(code) == 4) && strings.Trim(code, "0123456789") == ""
 }
 func parsePolyline(value string) []Point {
 	points := []Point{}
